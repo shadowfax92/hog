@@ -1,6 +1,6 @@
 <div align="center">
 
-# hog
+# 🐷 hog
 
 **See what's actually hogging your Mac — and kill it.**
 
