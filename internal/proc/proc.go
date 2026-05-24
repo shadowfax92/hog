@@ -1,0 +1,149 @@
+// Package proc samples the macOS process table and derives per-process CPU%
+// over a sampling window by diffing cumulative CPU time across two snapshots.
+package proc
+
+import (
+	"fmt"
+	"os/exec"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Proc is a sampled process with CPU% measured over the sampling window.
+// Comm is the executable path and may contain spaces.
+type Proc struct {
+	PID    int
+	PPID   int
+	RSSKiB int64
+	CPUPct float64
+	Comm   string
+}
+
+// snapshotProc is one process at a single instant, before CPU% is derived.
+// cpuSec is cumulative CPU time (seconds) as reported by ps.
+type snapshotProc struct {
+	pid    int
+	ppid   int
+	rssKiB int64
+	cpuSec float64
+	comm   string
+}
+
+// Sample reads the process table, waits d, reads it again, and returns each
+// process with CPU% measured over the actual elapsed window.
+func Sample(d time.Duration) ([]Proc, error) {
+	first, err := snapshot()
+	if err != nil {
+		return nil, err
+	}
+	start := time.Now()
+	time.Sleep(d)
+	second, err := snapshot()
+	if err != nil {
+		return nil, err
+	}
+	return sampleFrom(first, second, time.Since(start)), nil
+}
+
+// sampleFrom is the pure CPU math: CPU% = (cpu2-cpu1)/elapsed*100 per PID.
+// A PID only in second is treated as born mid-window (cpu1 = 0). RSS and Comm
+// come from the latest (second) snapshot.
+func sampleFrom(first, second []snapshotProc, elapsed time.Duration) []Proc {
+	prev := make(map[int]float64, len(first))
+	for _, p := range first {
+		prev[p.pid] = p.cpuSec
+	}
+	secs := elapsed.Seconds()
+	if secs <= 0 {
+		secs = 1
+	}
+	out := make([]Proc, 0, len(second))
+	for _, p := range second {
+		delta := p.cpuSec - prev[p.pid]
+		if delta < 0 {
+			delta = 0
+		}
+		out = append(out, Proc{
+			PID:    p.pid,
+			PPID:   p.ppid,
+			RSSKiB: p.rssKiB,
+			CPUPct: delta / secs * 100,
+			Comm:   p.comm,
+		})
+	}
+	return out
+}
+
+// snapshot runs ps once. `-ww` prevents column truncation; trailing `=` on each
+// -o field drops headers; comm is last so its embedded spaces don't break the
+// leading numeric columns.
+func snapshot() ([]snapshotProc, error) {
+	out, err := exec.Command("ps", "-axww", "-o", "pid=,ppid=,rss=,time=,comm=").CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("ps snapshot: %s (%w)", strings.TrimSpace(string(out)), err)
+	}
+	return parsePS(string(out)), nil
+}
+
+// parsePS turns ps output into snapshots. The first four whitespace-delimited
+// fields are pid/ppid/rss/time; everything after is comm (path with spaces).
+func parsePS(raw string) []snapshotProc {
+	var procs []snapshotProc
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		ppid, err := strconv.Atoi(fields[1])
+		if err != nil {
+			continue
+		}
+		rss, err := strconv.ParseInt(fields[2], 10, 64)
+		if err != nil {
+			continue
+		}
+		procs = append(procs, snapshotProc{
+			pid:    pid,
+			ppid:   ppid,
+			rssKiB: rss,
+			cpuSec: parseCPUTime(fields[3]),
+			comm:   strings.Join(fields[4:], " "),
+		})
+	}
+	return procs
+}
+
+// parseCPUTime converts a macOS ps TIME field to seconds. Handles "MM:SS.ss"
+// (minutes unbounded — ps does not roll minutes into hours), "HH:MM:SS", and a
+// leading "DD-" days prefix ("DD-HH:MM:SS").
+func parseCPUTime(s string) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	var days float64
+	if dash := strings.IndexByte(s, '-'); dash >= 0 {
+		if d, err := strconv.ParseFloat(s[:dash], 64); err == nil {
+			days = d
+		}
+		s = s[dash+1:]
+	}
+	var total float64
+	for _, p := range strings.Split(s, ":") {
+		v, err := strconv.ParseFloat(p, 64)
+		if err != nil {
+			return days * 86400
+		}
+		total = total*60 + v
+	}
+	return days*86400 + total
+}
