@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -44,6 +45,36 @@ func Sample(d time.Duration) ([]Proc, error) {
 		return nil, err
 	}
 	return sampleFrom(first, second, time.Since(start)), nil
+}
+
+// List takes a single snapshot of the process table without a sampling window.
+// CPUPct is left 0 — use Sample when CPU% matters. Suited to the kill path,
+// which only needs current PIDs and command paths.
+func List() ([]Proc, error) {
+	snaps, err := snapshot()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Proc, 0, len(snaps))
+	for _, p := range snaps {
+		out = append(out, Proc{PID: p.pid, PPID: p.ppid, RSSKiB: p.rssKiB, Comm: p.comm})
+	}
+	return out, nil
+}
+
+// Terminate sends SIGTERM to each pid, waits a short grace period, then SIGKILL
+// to any still alive. Per-PID errors (already exited, not permitted) are ignored
+// so one stubborn process can't abort the rest.
+func Terminate(pids []int) {
+	for _, pid := range pids {
+		_ = syscall.Kill(pid, syscall.SIGTERM)
+	}
+	time.Sleep(1500 * time.Millisecond)
+	for _, pid := range pids {
+		if syscall.Kill(pid, syscall.Signal(0)) == nil { // still alive
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	}
 }
 
 // sampleFrom is the pure CPU math: CPU% = (cpu2-cpu1)/elapsed*100 per PID.

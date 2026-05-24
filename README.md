@@ -33,3 +33,14 @@ green is minor, yellow is noticeable, red is hogging.
 | `-d`, `--duration` | `5` | Sampling window in seconds (min 1; 5–30 gives a steadier read) |
 | `-m`, `--mem` | off | Sort by memory instead of CPU |
 | `-n`, `--limit` | `20` | Show at most N apps (`0` = all) |
+
+### Killing a hog
+
+```sh
+hog kill chrome     # match is case-insensitive and a substring of the app name
+hog kill node -f    # -f skips the confirmation prompt
+```
+
+`kill` finds every app whose name contains the pattern, shows how many processes
+it will terminate, and asks for confirmation (unless `-f`). It sends `SIGTERM`
+first and escalates to `SIGKILL` for anything still alive after a short grace.
