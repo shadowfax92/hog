@@ -10,12 +10,13 @@
 
 </div>
 
-`hog` samples the process table over a few seconds, groups each app's many processes into a single line, and ranks them by CPU or memory — color-coded by how big a share of your machine they're really using. When you spot the culprit, `hog kill <app>` takes out the whole group.
+`hog` samples the process table over a few seconds, groups each app's many processes into a single line, and ranks them by CPU or memory — color-coded by how big a share of your machine they're really using. Spot the culprit, drill into it with `hog details <app>`, and take out the whole group with `hog kill <app>` — or `hog details <app> -k` to `fzf`-pick just the runaway processes.
 
 - **Grouped by app** — Chrome's 20 helpers and Electron's swarm collapse into one row, so you see the *app* eating your machine, not 40 anonymous processes
 - **Sampled, not a snapshot** — averages CPU over 5–30s, so you catch the real hog instead of a one-frame blip
 - **Color-coded by impact** — green / yellow / red by the share of your Mac an app is actually using
-- **One-shot kill** — `hog kill chrome` terminates the whole group: `SIGTERM`, then `SIGKILL` for stragglers
+- **Drill in** — `hog details <app>` lists an app's processes with their real command lines, so you can tell the runaway dev server from the idle language servers
+- **Whole-group or surgical kill** — `hog kill chrome` ends the whole group; `hog details node -k` opens an `fzf` multi-select to kill just the offenders. Both `SIGTERM`, then `SIGKILL` for stragglers
 - **CPU or memory** — rank by either; `-m` flips it
 - **Zero config, one binary** — no daemon, no setup; shells out to `ps`, nothing left running
 
@@ -38,7 +39,8 @@ No config file, nothing to set up — `hog` reads the live process table on each
 hog            # sample 5s, rank apps by CPU
 hog -d 15      # sample longer for a steadier signal
 hog -m         # rank by memory instead
-hog details node  # list the processes inside the "node" group
+hog details node     # list the processes inside the "node" group
+hog details node -k  # fzf-pick the heavy processes and kill them
 hog kill node  # terminate every process in the "node" group
 ```
 
