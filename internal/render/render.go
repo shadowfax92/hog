@@ -87,10 +87,14 @@ func Table(rows []Row) string {
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(lipgloss.NewStyle().Faint(true)).
 		StyleFunc(func(row, col int) lipgloss.Style {
+			st := lipgloss.NewStyle().Padding(0, 1)
 			if row == table.HeaderRow {
-				return headerStyle
+				st = headerStyle.Padding(0, 1)
 			}
-			return lipgloss.NewStyle().PaddingRight(1)
+			if col > 0 { // CPU, MEM, PROCS are numeric — right-align
+				st = st.Align(lipgloss.Right)
+			}
+			return st
 		}).
 		Headers("APP", "CPU", "MEM", "PROCS")
 	for _, r := range rows {

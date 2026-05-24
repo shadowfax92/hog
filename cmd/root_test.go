@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"hog/internal/group"
 )
 
 func TestRootMetadata(t *testing.T) {
@@ -27,5 +29,18 @@ func TestVersionFlagPrintsVersion(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), Version) {
 		t.Fatalf("--version output %q does not contain version %q", buf.String(), Version)
+	}
+}
+
+func TestTopN(t *testing.T) {
+	groups := []group.Group{{App: "a"}, {App: "b"}, {App: "c"}}
+	if got := topN(groups, 2); len(got) != 2 {
+		t.Errorf("topN(_, 2) len = %d, want 2", len(got))
+	}
+	if got := topN(groups, 5); len(got) != 3 {
+		t.Errorf("topN(_, 5) len = %d, want 3 (n >= len is all)", len(got))
+	}
+	if got := topN(groups, 0); len(got) != 3 {
+		t.Errorf("topN(_, 0) len = %d, want 3 (0 is all)", len(got))
 	}
 }
