@@ -74,7 +74,7 @@ func runReport(cmd *cobra.Command, _ []string) error {
 
 	fmt.Fprintln(out, render.Table(toRows(groups, runtime.NumCPU(), totalRAMBytes())))
 	if len(groups) > 0 {
-		fmt.Fprintln(out, render.Hint("tip: `hog details <app>` lists the processes inside an app"))
+		fmt.Fprintln(out, render.Hint("tip: `hog details <app>` lists an app's processes; add -k to pick & kill them"))
 	}
 	return nil
 }

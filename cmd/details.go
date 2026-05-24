@@ -2,8 +2,13 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
 	"runtime"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"hog/internal/group"
@@ -15,7 +20,10 @@ import (
 
 const commandColWidth = 90
 
-var flagDetailsDuration int
+var (
+	flagDetailsDuration int
+	flagDetailsKill     bool
+)
 
 var detailsCmd = &cobra.Command{
 	Use:     "details <app>",
@@ -32,6 +40,7 @@ var detailsCmd = &cobra.Command{
 
 func init() {
 	detailsCmd.Flags().IntVarP(&flagDetailsDuration, "duration", "d", 5, "sampling window in seconds (min 1)")
+	detailsCmd.Flags().BoolVarP(&flagDetailsKill, "kill", "k", false, "pick processes in an fzf multi-select and kill them")
 	rootCmd.AddCommand(detailsCmd)
 }
 
@@ -62,6 +71,11 @@ func runDetails(cmd *cobra.Command, args []string) error {
 		byPID[p.PID] = p
 	}
 	cmds := proc.Commands(pidsOf(matches))
+
+	if flagDetailsKill {
+		return killViaPicker(out, matches, byPID, cmds)
+	}
+
 	ncpu := runtime.NumCPU()
 	totalRAM := totalRAMBytes()
 
@@ -93,6 +107,88 @@ func runDetails(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(out, render.DetailTable(rows))
 	}
 	return nil
+}
+
+// killViaPicker pools every process across the matched app(s), sorted by CPU
+// descending (the worst offenders first), into an fzf multi-select showing
+// PID/CPU/MEM/command, then terminates whatever the user picks.
+func killViaPicker(out io.Writer, matches []group.Group, byPID map[int]proc.Proc, cmds map[int]string) error {
+	pids := pidsOf(matches)
+	sort.SliceStable(pids, func(i, j int) bool {
+		return byPID[pids[i]].CPUPct > byPID[pids[j]].CPUPct
+	})
+
+	lines := make([]string, 0, len(pids))
+	for _, pid := range pids {
+		p := byPID[pid]
+		cmdline := cmds[pid]
+		if cmdline == "" {
+			cmdline = p.Comm
+		}
+		lines = append(lines, fmt.Sprintf("%-7d %6s %8s  %s",
+			pid,
+			fmt.Sprintf("%.0f%%", p.CPUPct),
+			render.HumanBytes(p.RSSKiB),
+			render.TruncateMiddle(cmdline, 120),
+		))
+	}
+
+	selected, err := pickPIDsFzf(lines)
+	if err != nil {
+		return err
+	}
+	if len(selected) == 0 {
+		fmt.Fprintln(out, "Nothing selected.")
+		return nil
+	}
+
+	proc.Terminate(selected)
+	ids := make([]string, len(selected))
+	for i, p := range selected {
+		ids[i] = strconv.Itoa(p)
+	}
+	fmt.Fprintf(out, "Terminated %d process(es): %s\n", len(selected), strings.Join(ids, " "))
+	return nil
+}
+
+// pickPIDsFzf pipes lines into `fzf --multi` and returns the PIDs of the chosen
+// lines (PID is the first column). A user cancel (fzf exit 130) yields no PIDs
+// and no error.
+func pickPIDsFzf(lines []string) ([]int, error) {
+	fzfCmd := exec.Command("fzf",
+		"--multi",
+		"--prompt", "kill > ",
+		"--header", "PID      CPU      MEM   COMMAND   ·   Tab=select  Enter=kill  Esc=cancel",
+		"--height", "100%",
+		"--reverse",
+	)
+	fzfCmd.Stdin = strings.NewReader(strings.Join(lines, "\n"))
+	fzfCmd.Stderr = os.Stderr
+
+	out, err := fzfCmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 130 {
+			return nil, nil // user pressed Esc / Ctrl-C
+		}
+		return nil, fmt.Errorf("fzf failed: %w (is fzf installed?)", err)
+	}
+	return parsePickedPIDs(string(out)), nil
+}
+
+// parsePickedPIDs reads the PID (first whitespace-delimited field) from each
+// non-empty line fzf echoes back.
+func parsePickedPIDs(out string) []int {
+	var pids []int
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if pid, err := strconv.Atoi(fields[0]); err == nil {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
 }
 
 // memShare is an app/process's resident memory as a fraction of physical RAM.

@@ -69,14 +69,21 @@ hog -m -n 5         # the 5 biggest memory users
 ### Details
 
 ```sh
-hog details node    # list every process in the "node" group, busiest first
-hog details chrome  # aliases: `detail`, `show`
+hog details node       # list every process in the "node" group, busiest first
+hog details chrome     # aliases: `detail`, `show`
+hog details node -k    # pick processes in an fzf multi-select and kill them
 ```
 
 Drills into one app: every member process with its PID, CPU%, memory, and full
 command line — so you can tell *which* of node's 60 processes is the actual hog
 (a runaway dev server) versus the idle ones (language servers). Accepts `-d` to
 set the sampling window, same as the report.
+
+With `-k`/`--kill`, instead of printing a table it opens an `fzf` picker of those
+processes — sorted by CPU, showing CPU% and memory — where you `Tab` to select the
+expensive ones and `Enter` to kill them (`SIGTERM`, then `SIGKILL`). This is how you
+surgically take out, say, four runaway `node` servers without touching the idle
+language servers in the same group. Requires [`fzf`](https://github.com/junegunn/fzf).
 
 ### Kill
 
