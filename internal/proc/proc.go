@@ -77,6 +77,40 @@ func Terminate(pids []int) {
 	}
 }
 
+// Commands returns the full command line (with arguments) for each pid, used to
+// tell apart same-executable processes (e.g. which script each `node` runs).
+// Dead pids are simply absent — ps may exit non-zero for them, which is fine.
+func Commands(pids []int) map[int]string {
+	if len(pids) == 0 {
+		return map[int]string{}
+	}
+	ids := make([]string, len(pids))
+	for i, p := range pids {
+		ids[i] = strconv.Itoa(p)
+	}
+	out, _ := exec.Command("ps", "-ww", "-o", "pid=,command=", "-p", strings.Join(ids, ",")).Output()
+	return parseCommands(string(out))
+}
+
+// parseCommands maps pid -> full command line from `ps -o pid=,command=` output.
+// The command (everything after the pid) is kept verbatim, spaces and all.
+func parseCommands(raw string) map[int]string {
+	m := make(map[int]string)
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		sp := strings.IndexByte(line, ' ')
+		if sp < 0 {
+			continue
+		}
+		pid, err := strconv.Atoi(line[:sp])
+		if err != nil {
+			continue
+		}
+		m[pid] = strings.TrimSpace(line[sp+1:])
+	}
+	return m
+}
+
 // sampleFrom is the pure CPU math: CPU% = (cpu2-cpu1)/elapsed*100 per PID.
 // A PID only in second is treated as born mid-window (cpu1 = 0). RSS and Comm
 // come from the latest (second) snapshot.

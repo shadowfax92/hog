@@ -51,6 +51,23 @@ func TestParseCPUTime(t *testing.T) {
 	}
 }
 
+func TestParseCommands(t *testing.T) {
+	raw := "  419 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --type=gpu\n" +
+		" 1234 /opt/homebrew/bin/node /Users/me/proj/node_modules/.bin/vite --port 3000\n" +
+		"garbage\n" +
+		"\n"
+	got := parseCommands(raw)
+	if len(got) != 2 {
+		t.Fatalf("parseCommands len = %d, want 2", len(got))
+	}
+	if want := "/opt/homebrew/bin/node /Users/me/proj/node_modules/.bin/vite --port 3000"; got[1234] != want {
+		t.Errorf("pid 1234 = %q, want %q", got[1234], want)
+	}
+	if want := "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --type=gpu"; got[419] != want {
+		t.Errorf("pid 419 = %q, want %q", got[419], want)
+	}
+}
+
 func TestSampleComputesWindowedCPU(t *testing.T) {
 	first := []snapshotProc{
 		{pid: 1, ppid: 0, rssKiB: 100, cpuSec: 10, comm: "/bin/a"},

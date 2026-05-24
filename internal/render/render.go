@@ -79,6 +79,61 @@ func HumanBytes(kib int64) string {
 	}
 }
 
+// DetailRow is one process line inside an app group (for `hog details`).
+type DetailRow struct {
+	PID      int
+	CPUText  string
+	CPULevel Level
+	MemText  string
+	MemLevel Level
+	Command  string
+}
+
+// TruncateMiddle shortens s to at most max runes, keeping the head and tail and
+// dropping the middle (where a "…" goes). Middle truncation keeps both the
+// executable hint and the tail of a command (script names live at the end).
+func TruncateMiddle(s string, max int) string {
+	r := []rune(s)
+	if max < 1 || len(r) <= max {
+		return s
+	}
+	if max <= 3 {
+		return string(r[:max])
+	}
+	avail := max - 1 // one rune for the ellipsis
+	head := avail / 2
+	tail := avail - head
+	return string(r[:head]) + "…" + string(r[len(r)-tail:])
+}
+
+// DetailTable renders per-process rows (already sorted/truncated by the caller).
+func DetailTable(rows []DetailRow) string {
+	headerStyle := lipgloss.NewStyle().Foreground(clrHdr).Bold(true)
+	t := table.New().
+		Border(lipgloss.NormalBorder()).
+		BorderStyle(lipgloss.NewStyle().Faint(true)).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			st := lipgloss.NewStyle().Padding(0, 1)
+			if row == table.HeaderRow {
+				st = headerStyle.Padding(0, 1)
+			}
+			if col < 3 { // PID, CPU, MEM — right-align; COMMAND stays left
+				st = st.Align(lipgloss.Right)
+			}
+			return st
+		}).
+		Headers("PID", "CPU", "MEM", "COMMAND")
+	for _, r := range rows {
+		t.Row(fmt.Sprintf("%d", r.PID), colorize(r.CPUText, r.CPULevel), colorize(r.MemText, r.MemLevel), r.Command)
+	}
+	return t.String()
+}
+
+// Hint renders an unobtrusive faint tip line.
+func Hint(text string) string {
+	return lipgloss.NewStyle().Faint(true).Render(text)
+}
+
 // Table renders rows (already sorted and truncated by the caller) into a
 // bordered, color-coded table. CPU and MEM cells are colored by their Level.
 func Table(rows []Row) string {

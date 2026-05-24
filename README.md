@@ -38,6 +38,7 @@ No config file, nothing to set up — `hog` reads the live process table on each
 hog            # sample 5s, rank apps by CPU
 hog -d 15      # sample longer for a steadier signal
 hog -m         # rank by memory instead
+hog details node  # list the processes inside the "node" group
 hog kill node  # terminate every process in the "node" group
 ```
 
@@ -64,6 +65,18 @@ hog -m -n 5         # the 5 biggest memory users
 | `-d`, `--duration` | `5` | Sampling window in seconds (min 1; 5–30 gives a steadier read) |
 | `-m`, `--mem` | off | Rank by memory instead of CPU |
 | `-n`, `--limit` | `20` | Show at most N apps (`0` = all) |
+
+### Details
+
+```sh
+hog details node    # list every process in the "node" group, busiest first
+hog details chrome  # aliases: `detail`, `show`
+```
+
+Drills into one app: every member process with its PID, CPU%, memory, and full
+command line — so you can tell *which* of node's 60 processes is the actual hog
+(a runaway dev server) versus the idle ones (language servers). Accepts `-d` to
+set the sampling window, same as the report.
 
 ### Kill
 

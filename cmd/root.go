@@ -73,6 +73,9 @@ func runReport(cmd *cobra.Command, _ []string) error {
 	groups = topN(groups, flagLimit)
 
 	fmt.Fprintln(out, render.Table(toRows(groups, runtime.NumCPU(), totalRAMBytes())))
+	if len(groups) > 0 {
+		fmt.Fprintln(out, render.Hint("tip: `hog details <app>` lists the processes inside an app"))
+	}
 	return nil
 }
 
@@ -82,17 +85,12 @@ func runReport(cmd *cobra.Command, _ []string) error {
 func toRows(groups []group.Group, ncpu int, totalRAM int64) []render.Row {
 	rows := make([]render.Row, 0, len(groups))
 	for _, g := range groups {
-		cpuFrac := g.CPUPct / (100 * float64(ncpu))
-		var memFrac float64
-		if totalRAM > 0 {
-			memFrac = float64(g.RSSKiB) * 1024 / float64(totalRAM)
-		}
 		rows = append(rows, render.Row{
 			App:      g.App,
 			CPUText:  fmt.Sprintf("%.0f%%", g.CPUPct),
-			CPULevel: render.LevelOf(cpuFrac),
+			CPULevel: render.LevelOf(g.CPUPct / (100 * float64(ncpu))),
 			MemText:  render.HumanBytes(g.RSSKiB),
-			MemLevel: render.LevelOf(memFrac),
+			MemLevel: render.LevelOf(memShare(g.RSSKiB, totalRAM)),
 			Count:    g.Count,
 		})
 	}
