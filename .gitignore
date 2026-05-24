@@ -1,0 +1,5 @@
+/hog
+
+# Scratch planning artifacts — never commit
+.llm/
+.DS_Store
