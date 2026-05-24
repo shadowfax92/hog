@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="402" height="348" viewBox="0 0 402 348" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">
+<rect x="0" y="0" width="402" height="348" rx="10" fill="#0d1117"/>
+<rect x="0" y="0" width="402" height="34" rx="10" fill="#161b22"/>
+<rect x="0" y="24" width="402" height="10" fill="#161b22"/>
+<circle cx="20" cy="17" r="6" fill="#ff5f56"/>
+<circle cx="40" cy="17" r="6" fill="#ffbd2e"/>
+<circle cx="60" cy="17" r="6" fill="#27c93f"/>
+<text x="201" y="21" fill="#8b949e" font-size="12" text-anchor="middle">hog — resource hogs</text>
+<text x="18" y="63" font-size="15" xml:space="preserve"><tspan fill="#3fb950">$ </tspan><tspan fill="#c9d1d9">hog</tspan></text>
+<text x="18" y="85" font-size="15" xml:space="preserve"><tspan fill="#8b949e">Sampling for 5s, ranking apps by CPU…</tspan></text>
+<text x="18" y="107" font-size="15" xml:space="preserve"></text>
+<text x="18" y="129" font-size="15" xml:space="preserve"><tspan fill="#484f58">┌───────────────┬──────┬──────┬───────┐</tspan></text>
+<text x="18" y="151" font-size="15" xml:space="preserve"><tspan fill="#484f58">│</tspan><tspan fill="#39c5cf"> APP           </tspan><tspan fill="#484f58">│</tspan><tspan fill="#39c5cf">  CPU </tspan><tspan fill="#484f58">│</tspan><tspan fill="#39c5cf">  MEM </tspan><tspan fill="#484f58">│</tspan><tspan fill="#39c5cf"> PROCS </tspan><tspan fill="#484f58">│</tspan></text>
+<text x="18" y="173" font-size="15" xml:space="preserve"><tspan fill="#484f58">├───────────────┼──────┼──────┼───────┤</tspan></text>
+<text x="18" y="195" font-size="15" xml:space="preserve"><tspan fill="#484f58">│</tspan><tspan fill="#c9d1d9"> node          </tspan><tspan fill="#484f58">│</tspan><tspan fill="#f85149"> 408% </tspan><tspan fill="#484f58">│</tspan><tspan fill="#d29922"> 3.3G </tspan><tspan fill="#484f58">│</tspan><tspan fill="#c9d1d9">    57 </tspan><tspan fill="#484f58">│</tspan></text>
+<text x="18" y="217" font-size="15" xml:space="preserve"><tspan fill="#484f58">│</tspan><tspan fill="#c9d1d9"> Google Chrome </tspan><tspan fill="#484f58">│</tspan><tspan fill="#d29922"> 126% </tspan><tspan fill="#484f58">│</tspan><tspan fill="#f85149"> 6.1G </tspan><tspan fill="#484f58">│</tspan><tspan fill="#c9d1d9">    23 </tspan><tspan fill="#484f58">│</tspan></text>
+<text x="18" y="239" font-size="15" xml:space="preserve"><tspan fill="#484f58">│</tspan><tspan fill="#c9d1d9"> BrowserOS     </tspan><tspan fill="#484f58">│</tspan><tspan fill="#3fb950">  48% </tspan><tspan fill="#484f58">│</tspan><tspan fill="#d29922"> 3.2G </tspan><tspan fill="#484f58">│</tspan><tspan fill="#c9d1d9">    39 </tspan><tspan fill="#484f58">│</tspan></text>
+<text x="18" y="261" font-size="15" xml:space="preserve"><tspan fill="#484f58">│</tspan><tspan fill="#c9d1d9"> Slack         </tspan><tspan fill="#484f58">│</tspan><tspan fill="#3fb950">  22% </tspan><tspan fill="#484f58">│</tspan><tspan fill="#3fb950"> 1.4G </tspan><tspan fill="#484f58">│</tspan><tspan fill="#c9d1d9">     6 </tspan><tspan fill="#484f58">│</tspan></text>
+<text x="18" y="283" font-size="15" xml:space="preserve"><tspan fill="#484f58">│</tspan><tspan fill="#c9d1d9"> nvim          </tspan><tspan fill="#484f58">│</tspan><tspan fill="#3fb950">   9% </tspan><tspan fill="#484f58">│</tspan><tspan fill="#3fb950"> 720M </tspan><tspan fill="#484f58">│</tspan><tspan fill="#c9d1d9">    12 </tspan><tspan fill="#484f58">│</tspan></text>
+<text x="18" y="305" font-size="15" xml:space="preserve"><tspan fill="#484f58">│</tspan><tspan fill="#c9d1d9"> Telegram      </tspan><tspan fill="#484f58">│</tspan><tspan fill="#3fb950">   4% </tspan><tspan fill="#484f58">│</tspan><tspan fill="#3fb950"> 100M </tspan><tspan fill="#484f58">│</tspan><tspan fill="#c9d1d9">     1 </tspan><tspan fill="#484f58">│</tspan></text>
+<text x="18" y="327" font-size="15" xml:space="preserve"><tspan fill="#484f58">└───────────────┴──────┴──────┴───────┘</tspan></text>
+</svg>
