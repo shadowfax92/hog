@@ -39,9 +39,11 @@ No config file, nothing to set up — `hog` reads the live process table on each
 hog            # sample 5s, rank apps by CPU
 hog -d 15      # sample longer for a steadier signal
 hog -m         # rank by memory instead
+hog details        # fzf-pick one or more app groups to inspect
 hog details node     # list the processes inside the "node" group
-hog details node -k  # fzf-pick the heavy processes and kill them
+hog details -k       # fzf-pick app group(s), then process(es) to kill
 hog kill node  # terminate every process in the "node" group
+hog kill       # fzf-pick one or more app groups to terminate
 ```
 
 ## How It Works
@@ -71,9 +73,11 @@ hog -m -n 5         # the 5 biggest memory users
 ### Details
 
 ```sh
+hog details            # fzf-pick one or more app groups
 hog details node       # list every process in the "node" group, busiest first
 hog details chrome     # aliases: `detail`, `show`
 hog details node -k    # pick processes in an fzf multi-select and kill them
+hog details -k         # fzf-pick app group(s), then process(es) to kill
 ```
 
 Drills into one app: every member process with its PID, CPU%, memory, and full
@@ -81,20 +85,30 @@ command line — so you can tell *which* of node's 60 processes is the actual ho
 (a runaway dev server) versus the idle ones (language servers). Accepts `-d` to
 set the sampling window, same as the report.
 
+If `<app>` is omitted, `details` opens an `fzf` multi-select picker of sampled
+app groups. Select one or more groups to render their process details.
+
 With `-k`/`--kill`, instead of printing a table it opens an `fzf` picker of those
 processes — sorted by CPU, showing CPU% and memory — where you `Tab` to select the
 expensive ones and `Enter` to kill them (`SIGTERM`, then `SIGKILL`). This is how you
 surgically take out, say, four runaway `node` servers without touching the idle
-language servers in the same group. Requires [`fzf`](https://github.com/junegunn/fzf).
+language servers in the same group. If `<app>` is omitted, `details -k` first
+asks you to pick the app group(s), then opens the process picker. Requires
+[`fzf`](https://github.com/junegunn/fzf).
 
 ### Kill
 
 ```sh
+hog kill            # fzf-pick one or more app groups
 hog kill chrome     # match is a case-insensitive substring of the app name
 hog kill node -f    # -f skips the confirmation prompt
 ```
 
 `kill` finds every app whose name contains the pattern, shows how many processes it will terminate, and asks before acting (unless `-f`). It sends `SIGTERM` first, waits a short grace, then `SIGKILL`s anything still alive.
+
+If `<app>` is omitted, `kill` opens an `fzf` multi-select picker of app groups
+sorted by memory, then uses the same confirmation and termination flow for the
+selected groups.
 
 > Note: `hog kill <app>` targets the **whole group** — `hog kill node` hits every `node` process at once. The prompt shows the count before it acts.
 
