@@ -3,8 +3,6 @@ package cmd
 import (
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"runtime"
 	"sort"
 	"strconv"
@@ -26,13 +24,14 @@ var (
 )
 
 var detailsCmd = &cobra.Command{
-	Use:     "details <app>",
+	Use:     "details [app]",
 	Aliases: []string{"detail", "show"},
 	Short:   "List the individual processes inside an app group",
 	Long: "details samples the process table, finds the app(s) whose name contains <app>,\n" +
 		"and lists each member process with its CPU%, memory, and full command line —\n" +
-		"so you can see which of, say, node's many processes is the actual hog.",
-	Args:          cobra.ExactArgs(1),
+		"so you can see which of, say, node's many processes is the actual hog.\n" +
+		"If <app> is omitted, details opens an fzf multi-select picker of app groups.",
+	Args:          cobra.MaximumNArgs(1),
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE:          runDetails,
@@ -44,11 +43,8 @@ func init() {
 	rootCmd.AddCommand(detailsCmd)
 }
 
-// runDetails drills into a matched app group and lists its member processes,
-// sorted by CPU, each with the full command line (so same-exe processes like
-// node are distinguishable by the script/args they run).
+// runDetails lists the sampled processes inside one or more selected app groups.
 func runDetails(cmd *cobra.Command, args []string) error {
-	pattern := args[0]
 	dur := flagDetailsDuration
 	if dur < 1 {
 		dur = 1
@@ -60,10 +56,10 @@ func runDetails(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	matches := group.Match(group.Aggregate(procs), pattern)
-	if len(matches) == 0 {
-		fmt.Fprintf(out, "No running app matches %q.\n", pattern)
-		return nil
+	groups := group.Aggregate(procs)
+	matches, err := detailsGroups(out, groups, args)
+	if err != nil || len(matches) == 0 {
+		return err
 	}
 
 	byPID := make(map[int]proc.Proc, len(procs))
@@ -109,9 +105,42 @@ func runDetails(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// killViaPicker pools every process across the matched app(s), sorted by CPU
-// descending (the worst offenders first), into an fzf multi-select showing
-// PID/CPU/MEM/command, then terminates whatever the user picks.
+// detailsGroups matches an app arg or asks fzf to choose groups when the arg is omitted.
+func detailsGroups(out io.Writer, groups []group.Group, args []string) ([]group.Group, error) {
+	if len(args) > 0 {
+		pattern := args[0]
+		matches := group.Match(groups, pattern)
+		if len(matches) == 0 {
+			fmt.Fprintf(out, "No running app matches %q.\n", pattern)
+		}
+		return matches, nil
+	}
+
+	group.Sort(groups, false)
+	if len(groups) == 0 {
+		fmt.Fprintln(out, "No running apps found.")
+		return nil, nil
+	}
+
+	action := "details"
+	if flagDetailsKill {
+		action = "processes"
+	}
+	matches, err := pickGroupsFzf(groups, groupPickerOptions{
+		prompt: "apps > ",
+		action: action,
+		metric: groupPickerCPU,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(matches) == 0 {
+		fmt.Fprintln(out, "Nothing selected.")
+	}
+	return matches, nil
+}
+
+// killViaPicker lets the user pick individual processes from matched groups.
 func killViaPicker(out io.Writer, matches []group.Group, byPID map[int]proc.Proc, cmds map[int]string) error {
 	pids := pidsOf(matches)
 	sort.SliceStable(pids, func(i, j int) bool {
@@ -151,32 +180,20 @@ func killViaPicker(out io.Writer, matches []group.Group, byPID map[int]proc.Proc
 	return nil
 }
 
-// pickPIDsFzf pipes lines into `fzf --multi` and returns the PIDs of the chosen
-// lines (PID is the first column). A user cancel (fzf exit 130) yields no PIDs
-// and no error.
+// pickPIDsFzf returns the first-column PIDs from the selected fzf lines.
 func pickPIDsFzf(lines []string) ([]int, error) {
-	fzfCmd := exec.Command("fzf",
-		"--multi",
-		"--prompt", "kill > ",
-		"--header", "PID      CPU      MEM   COMMAND   ·   Tab=select  Enter=kill  Esc=cancel",
-		"--height", "100%",
-		"--reverse",
-	)
-	fzfCmd.Stdin = strings.NewReader(strings.Join(lines, "\n"))
-	fzfCmd.Stderr = os.Stderr
-
-	out, err := fzfCmd.Output()
+	out, err := runFzf(lines, fzfOptions{
+		prompt: "kill > ",
+		header: "PID      CPU      MEM   COMMAND   ·   Tab=select  Enter=kill  Esc=cancel",
+		multi:  true,
+	})
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 130 {
-			return nil, nil // user pressed Esc / Ctrl-C
-		}
-		return nil, fmt.Errorf("fzf failed: %w (is fzf installed?)", err)
+		return nil, err
 	}
-	return parsePickedPIDs(string(out)), nil
+	return parsePickedPIDs(out), nil
 }
 
-// parsePickedPIDs reads the PID (first whitespace-delimited field) from each
-// non-empty line fzf echoes back.
+// parsePickedPIDs reads the first whitespace-delimited field from fzf output.
 func parsePickedPIDs(out string) []int {
 	var pids []int
 	for _, line := range strings.Split(out, "\n") {
