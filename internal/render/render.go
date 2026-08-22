@@ -317,3 +317,46 @@ func levelColor(lvl Level) lipgloss.Color {
 		return clrLow
 	}
 }
+
+// CheckHeading renders a check's name for the per-check explanation view.
+func CheckHeading(name string, lvl Level) string {
+	return lipgloss.NewStyle().Bold(true).Foreground(levelColor(lvl)).Render(name)
+}
+
+// causeLabelWidth is the fixed column an app name occupies in a cause line.
+// Names are truncated to it so a long one cannot run into the note beside it.
+const causeLabelWidth = 24
+
+// CauseLine renders one contributor to a check: what it is, how much it
+// accounts for, and a qualifying note.
+func CauseLine(value, label, note string) string {
+	if len([]rune(label)) > causeLabelWidth {
+		label = TruncateMiddle(label, causeLabelWidth)
+	}
+	line := fmt.Sprintf("    %8s  %-*s", value, causeLabelWidth, label)
+	if note != "" {
+		return line + lipgloss.NewStyle().Faint(true).Render(note)
+	}
+	return line
+}
+
+// Wrap reflows text to width, prefixing each line with indent. Explanations are
+// prose and need to stay readable in a narrow terminal.
+func Wrap(text string, width int, indent string) string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return ""
+	}
+	faint := lipgloss.NewStyle().Faint(true)
+	var lines []string
+	line := words[0]
+	for _, w := range words[1:] {
+		if len(line)+1+len(w) > width {
+			lines = append(lines, faint.Render(indent+line))
+			line = w
+			continue
+		}
+		line += " " + w
+	}
+	return strings.Join(append(lines, faint.Render(indent+line)), "\n")
+}

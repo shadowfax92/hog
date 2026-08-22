@@ -204,6 +204,7 @@ first run.
 
 ```sh
 hog health           # 15-second window
+hog health -e        # explain every check and what's causing it
 hog health -d 30     # longer window for a steadier read
 ```
 
@@ -245,6 +246,39 @@ swap headroom is the bottleneck: 16.1G of 17.0G used — 938M free
 reading cannot tell a machine thrashing right now from one that thrashed days
 ago; only the change across an interval can. Fifteen seconds is long enough for
 a stable rate and short enough to wait for.
+
+**Every check explains itself.** A score tells you something is wrong without
+telling you what kind of wrong, so each check states its mechanism and — where
+the kernel makes it attributable — names the processes responsible. Swap ranks
+by *evicted* bytes (footprint that is no longer resident), which is what is
+actually sitting in the swap file:
+
+```
+swap headroom is the bottleneck: 16.1G of 17.0G used — 938M free
+  Swap is the disk file holding pages evicted from RAM. It fills when processes
+  ask for more memory than the machine has, and when it runs out macOS stops
+  being graceful and starts killing things. The apps below hold the most memory
+  that is no longer resident, so they are what is in there.
+       32.0G  rust-analyzer           6 proc(s) · 96% of its footprint evicted
+        6.0G  node                    69 proc(s) · 44% of its footprint evicted
+        949M  mds_stores              1 proc(s) · 100% of its footprint evicted
+  → free memory now — at zero, macOS starts force-killing applications
+```
+
+Note that swap and memory pressure rank the *same* process table differently: a
+large but fully resident app is a memory-pressure cause and not a swap cause,
+because none of it was evicted.
+
+Three checks measure a whole-machine property the kernel does not break down
+per process — paging rate, kernel time, and disk space. Those say so rather
+than inventing an attribution.
+
+Per-process eviction is an estimate (footprint minus resident). macOS exposes
+the exact compressed size only via `task_info(TASK_VM_INFO)`, which needs an
+entitlement `hog` doesn't have — `task_for_pid` fails even for your own
+processes. The subtraction is accurate for genuinely swapped processes and
+overstates eviction for GPU-backed apps, so it is used to rank and explain,
+never to decide anything.
 
 **The score never hides a failure.** A machine one gigabyte from swap
 exhaustion is in serious trouble however healthy its CPU and disk look, so any

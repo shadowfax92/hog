@@ -1,6 +1,9 @@
 package health
 
 import (
+	"fmt"
+
+	"hog/internal/proc"
 	"testing"
 	"time"
 )
@@ -192,5 +195,82 @@ func TestScoreRange(t *testing.T) {
 		if got := scoreRange(c.v, c.best, c.worst); got != c.want {
 			t.Errorf("scoreRange(%v, %v, %v) = %d, want %d", c.v, c.best, c.worst, got, c.want)
 		}
+	}
+}
+
+// Attribution turns "swap is full" into "rust-analyzer is what is in it",
+// which is the difference between a symptom and a diagnosis.
+func TestSwapHeadroomNamesTheProcessesFillingIt(t *testing.T) {
+	in := healthy()
+	in.Swap = SwapUsage{Total: 64 << 30, Used: 63 << 30, Avail: 900 << 20}
+	in.Processes = []proc.Proc{
+		// Almost entirely evicted: 8 GiB footprint, 100 MiB resident.
+		{PID: 1, Comm: "/bin/rust-analyzer", FootprintKiB: 8 << 20, ResidentKiB: 100 << 10},
+		{PID: 2, Comm: "/bin/rust-analyzer", FootprintKiB: 8 << 20, ResidentKiB: 100 << 10},
+		// Large but fully resident: not in swap, so not a cause.
+		{PID: 3, Comm: "/bin/browser", FootprintKiB: 12 << 20, ResidentKiB: 12 << 20},
+	}
+	c := checkNamed(Evaluate(in), "swap headroom")
+	if len(c.Causes) == 0 {
+		t.Fatal("expected the check to name what is filling swap")
+	}
+	if c.Causes[0].Label != "rust-analyzer" {
+		t.Errorf("top cause = %q, want rust-analyzer", c.Causes[0].Label)
+	}
+	for _, cause := range c.Causes {
+		if cause.Label == "browser" {
+			t.Error("a fully resident process is not in swap and must not be blamed for it")
+		}
+	}
+	if c.Because == "" {
+		t.Error("the check should explain the mechanism, not just the number")
+	}
+}
+
+// Memory pressure ranks by total footprint, where swap ranks by evicted bytes:
+// the same process table produces different leaders.
+func TestMemoryPressureRanksByFootprintNotEviction(t *testing.T) {
+	in := healthy()
+	in.Processes = []proc.Proc{
+		{PID: 1, Comm: "/bin/evicted", FootprintKiB: 4 << 20, ResidentKiB: 0},
+		{PID: 2, Comm: "/bin/resident", FootprintKiB: 12 << 20, ResidentKiB: 12 << 20},
+	}
+	c := checkNamed(Evaluate(in), "memory pressure")
+	if len(c.Causes) == 0 || c.Causes[0].Label != "resident" {
+		t.Errorf("top cause = %+v, want the largest footprint", c.Causes)
+	}
+}
+
+// Checks measuring a whole-machine property must not invent an attribution.
+func TestUnattributableChecksCarryNoCauses(t *testing.T) {
+	in := healthy()
+	in.Processes = []proc.Proc{{PID: 1, Comm: "/bin/x", FootprintKiB: 1 << 20}}
+	r := Evaluate(in)
+	for _, name := range []string{"swap activity", "kernel time", "disk headroom"} {
+		if c := checkNamed(r, name); len(c.Causes) != 0 {
+			t.Errorf("%s should have no per-process causes, got %d", name, len(c.Causes))
+		} else if c.Because == "" {
+			t.Errorf("%s should still explain itself", name)
+		}
+	}
+}
+
+func TestEveryCheckExplainsItself(t *testing.T) {
+	for _, c := range Evaluate(healthy()).Checks {
+		if c.Because == "" {
+			t.Errorf("check %q has no explanation", c.Name)
+		}
+	}
+}
+
+func TestCausesAreBounded(t *testing.T) {
+	in := healthy()
+	for i := range 40 {
+		in.Processes = append(in.Processes, proc.Proc{
+			PID: i + 1, Comm: fmt.Sprintf("/bin/app%02d", i), FootprintKiB: int64(i+1) << 18,
+		})
+	}
+	if c := checkNamed(Evaluate(in), "memory pressure"); len(c.Causes) > maxCauses {
+		t.Errorf("got %d causes, want at most %d", len(c.Causes), maxCauses)
 	}
 }

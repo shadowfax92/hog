@@ -11,6 +11,8 @@ package health
 import (
 	"fmt"
 	"time"
+
+	"hog/internal/proc"
 )
 
 // Level is one check's severity.
@@ -52,6 +54,25 @@ type Check struct {
 	Detail string
 	Remedy string
 	Weight int
+
+	// Because states the mechanism: what this metric actually measures and why
+	// it makes a machine feel slow. A score alone tells you something is wrong
+	// without telling you what kind of wrong.
+	Because string
+
+	// Causes names the processes responsible, largest first, for the checks
+	// where the pressure can be attributed. Checks measuring a whole-machine
+	// property the kernel does not break down per process (paging rate, time
+	// spent in the kernel, disk space) carry no causes, and say so rather than
+	// inventing an attribution.
+	Causes []Cause
+}
+
+// Cause is one contributor to a check, already formatted for display.
+type Cause struct {
+	Label string
+	Value string
+	Note  string
 }
 
 // Inputs are the measurements Evaluate scores. Counter pairs (VM0/VM1,
@@ -77,6 +98,11 @@ type Inputs struct {
 	// `hog reap` uses, so the remedy is exact rather than a guess.
 	ReclaimBytes uint64
 	ReclaimCount int
+
+	// Processes is the sampled process table, used to attribute pressure to
+	// the processes causing it. Reclaim is the subset `hog reap` would take.
+	Processes []proc.Proc
+	Reclaim   []proc.Proc
 }
 
 // Report is the outcome of one evaluation.
@@ -150,8 +176,15 @@ func Evaluate(in Inputs) Report {
 // whether the file is 4 GB or 64 GB.
 func swapHeadroom(in Inputs) Check {
 	c := Check{Name: "swap headroom", Weight: 3, Score: 100, Level: Good}
+	c.Because = "Swap is the disk file holding pages evicted from RAM. It fills when " +
+		"processes ask for more memory than the machine has, and when it runs out " +
+		"macOS stops being graceful and starts killing things. The apps below hold " +
+		"the most memory that is no longer resident, so they are what is in there."
+	c.Causes = evictionCauses(in.Processes)
 	if in.Swap.Total == 0 {
 		c.Detail = "no swap file in use"
+		c.Because = "macOS has not needed a swap file, which means RAM has been sufficient."
+		c.Causes = nil
 		return c
 	}
 	freeGB := float64(in.Swap.Avail) / gib
@@ -172,6 +205,10 @@ func swapHeadroom(in Inputs) Check {
 // and it is the reason health samples over an interval instead of snapshotting.
 func swapActivity(in Inputs) Check {
 	c := Check{Name: "swap activity", Weight: 3, Score: 100, Level: Good}
+	c.Because = "Pages moving between RAM and disk during the window. A full swap file " +
+		"is survivable if nothing is reading from it; sustained traffic is not, because " +
+		"every page fault stalls a process on disk. The kernel does not attribute this " +
+		"traffic per process, so there is no breakdown — read it alongside swap headroom."
 	secs := in.Window.Seconds()
 	if secs <= 0 {
 		secs = 1
@@ -194,6 +231,10 @@ func swapActivity(in Inputs) Check {
 // the free fraction sets the score.
 func memoryPressure(in Inputs) Check {
 	c := Check{Name: "memory pressure", Weight: 3, Score: 100, Level: Good}
+	c.Because = "How much memory can still be handed out, with the severity set by the " +
+		"kernel's own pressure level — the same signal macOS acts on when it decides to " +
+		"terminate applications. These apps hold the largest footprints."
+	c.Causes = footprintCauses(in.Processes)
 	if in.TotalRAM == 0 {
 		c.Detail = "unknown"
 		return c
@@ -226,6 +267,10 @@ func memoryPressure(in Inputs) Check {
 // because it is measured with the same selection `hog reap` acts on.
 func reclaimable(in Inputs) Check {
 	c := Check{Name: "reclaimable", Weight: 2, Score: 100, Level: Good}
+	c.Because = "Memory held by processes that are old, have spent almost none of their " +
+		"life on CPU, and are idle now — waste rather than working set. This is exactly " +
+		"what `hog reap` would take."
+	c.Causes = footprintCauses(in.Reclaim)
 	if in.TotalRAM == 0 || in.ReclaimCount == 0 {
 		c.Detail = "nothing dormant worth reclaiming"
 		return c
@@ -250,6 +295,10 @@ func reclaimable(in Inputs) Check {
 // running anyone's code.
 func kernelTime(in Inputs) Check {
 	c := Check{Name: "kernel time", Weight: 2, Score: 100, Level: Good}
+	c.Because = "The share of CPU spent inside the kernel rather than in your programs. " +
+		"A high figure on an otherwise idle machine means the cores are busy compressing " +
+		"and faulting pages instead of running anyone's code. Kernel time belongs to no " +
+		"single process, so it has no breakdown; it corroborates the swap checks."
 	d := in.CPU1.Sub(in.CPU0)
 	total := d.Total()
 	if total == 0 {
@@ -274,6 +323,10 @@ func kernelTime(in Inputs) Check {
 // CPU — means processes are blocked on I/O rather than computing.
 func cpuLoad(in Inputs) Check {
 	c := Check{Name: "cpu load", Weight: 2, Score: 100, Level: Good}
+	c.Because = "How many processes want to run at once, against the number of cores. " +
+		"Load counts processes blocked on disk as well as computing, so a high load with " +
+		"an idle CPU means they are waiting on paging, not working."
+	c.Causes = cpuCauses(in.Processes)
 	if in.NumCPU == 0 {
 		c.Detail = "unknown"
 		return c
@@ -294,6 +347,10 @@ func cpuLoad(in Inputs) Check {
 // normal on a developer machine and only hints at accumulation.
 func processCount(in Inputs) Check {
 	c := Check{Name: "process count", Weight: 1, Score: 100, Level: Good}
+	c.Because = "A large count is normal on a developer machine, so this is a weak signal " +
+		"and weighted accordingly. It matters when one program dominates the list: that is " +
+		"something spawning processes faster than it reaps them."
+	c.Causes = countCauses(in.Processes)
 	c.Score = scoreRange(float64(in.Procs), 600, 2500)
 	c.Detail = fmt.Sprintf("%d processes", in.Procs)
 	if in.Threads > 0 {
@@ -312,6 +369,9 @@ func processCount(in Inputs) Check {
 // because swap files live there: a full disk means swap cannot grow.
 func diskHeadroom(in Inputs) Check {
 	c := Check{Name: "disk headroom", Weight: 1, Score: 100, Level: Good}
+	c.Because = "Free space on the data volume. It matters beyond storage because swap " +
+		"files live there: on a full disk swap cannot grow, so memory pressure turns into " +
+		"process termination sooner. Disk usage is not attributable to running processes."
 	if in.Disk.Total == 0 {
 		c.Detail = "unknown"
 		return c
