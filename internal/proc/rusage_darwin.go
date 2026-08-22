@@ -28,6 +28,7 @@ type Stats struct {
 	Resident      int64         // pages actually in RAM right now
 	CPU           time.Duration // total user+system CPU consumed since exec
 	Age           time.Duration // wall-clock time since the process started
+	Threads       int           // live threads, for machine-wide accounting
 }
 
 // machTimebase converts mach absolute-time ticks to nanoseconds. The ratio is
@@ -71,6 +72,7 @@ func ReadStats(pid int) (Stats, bool) {
 	var ti C.struct_proc_taskinfo
 	if C.proc_pidinfo(C.int(pid), C.PROC_PIDTASKINFO, 0, unsafe.Pointer(&ti), C.int(unsafe.Sizeof(ti))) > 0 {
 		s.Resident = int64(ti.pti_resident_size)
+		s.Threads = int(ti.pti_threadnum)
 	}
 	return s, true
 }

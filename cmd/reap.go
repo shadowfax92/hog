@@ -56,6 +56,10 @@ func init() {
 	rootCmd.AddCommand(reapCmd)
 }
 
+// currentPID is the running hog process, which reap uses to spare itself and
+// its ancestors.
+func currentPID() int { return os.Getpid() }
+
 const reapDisplayLimit = 25
 
 // runReap samples the process table, applies the reap predicates and probes,
@@ -85,7 +89,7 @@ func runReap(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	res := reap.Select(procs, crit, os.Getpid(), cfg.Protect)
+	res := reap.Select(procs, crit, currentPID(), cfg.Protect)
 	reap.ApplyProbes(&res, cfg.Probes, reap.DefaultProbeTimeout)
 
 	printReapSummary(out, res, crit)

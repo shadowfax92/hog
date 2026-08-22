@@ -34,6 +34,7 @@ type Proc struct {
 
 	Age      time.Duration // wall-clock since process start
 	CPUTotal time.Duration // lifetime user+system CPU
+	Threads  int           // live threads
 
 	// Measured reports whether kernel accounting was readable. The kernel
 	// denies proc_pid_rusage for processes owned by other users, so Measured
@@ -133,6 +134,7 @@ func newProc(p snapshotProc, cpuPct float64) Proc {
 		out.ResidentKiB = p.stats.Resident / 1024
 		out.Age = p.stats.Age
 		out.CPUTotal = p.stats.CPU
+		out.Threads = p.stats.Threads
 	}
 	return out
 }

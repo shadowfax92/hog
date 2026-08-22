@@ -16,6 +16,7 @@
 - **Real memory, not RSS** — reads each process's kernel footprint, so the dormant 7 GB language server that `ps` reports as 0 KB can't hide
 - **Sampled, not a snapshot** — averages CPU over 5–30s, so you catch the real hog instead of a one-frame blip
 - **Reap the dead weight** — `hog reap` finds processes that are old, dormant, and still holding memory, and shows what killing them would free before it kills anything
+- **One-shot verdict** — `hog health` weighs swap, memory, paging, CPU and disk over a window and tells you which subsystem is actually the bottleneck
 - **Color-coded by impact** — green / yellow / red by the share of your Mac an app is actually using
 - **Drill in** — `hog details <app>` lists an app's processes with their real command lines, so you can tell the runaway dev server from the idle language servers
 - **Whole-group or surgical kill** — `hog kill chrome` ends the whole group; `hog details node -k` opens an `fzf` multi-select to kill just the offenders. Both `SIGTERM`, then `SIGKILL` for stragglers
@@ -50,6 +51,7 @@ hog kill       # fzf-pick one or more app groups to terminate
 hog reap       # dry run: what's old, dormant, and big — and what killing it frees
 hog reap -x    # actually reap it
 hog reap -i    # fzf-pick from the candidates
+hog health     # 15s check: is this machine in trouble, and which part?
 ```
 
 ## How It Works
@@ -197,6 +199,58 @@ silently smaller total.
 
 Config lives at `~/.config/hog/reap.yaml`, written with commented defaults on
 first run.
+
+### Health
+
+```sh
+hog health           # 15-second window
+hog health -d 30     # longer window for a steadier read
+```
+
+Scores eight dimensions and combines them into one verdict:
+
+```
+⚠  DEGRADED — 72/100
+
+┌─────────────────┬───────┬────────────┬─────────────────────────────────────────────┐
+│ CHECK           │ SCORE │            │ DETAIL                                      │
+├─────────────────┼───────┼────────────┼─────────────────────────────────────────────┤
+│ swap headroom   │    11 │ █········· │ 16.1G of 17.0G used — 938M free             │
+│ swap activity   │    97 │ ██████████ │ 21 pages/s to and from swap                 │
+│ memory pressure │   100 │ ██████████ │ 92.9G available of 128.0G · 2.8G compressed │
+│ reclaimable     │    53 │ █████····· │ 39.0G held by 17 dormant process(es)        │
+│ kernel time     │   100 │ ██████████ │ 8% system, 20% busy overall                 │
+│ cpu load        │   100 │ ██████████ │ 7.1 on 16 cores (0.44 per core)             │
+│ process count   │    52 │ █████····· │ 1507 processes, 8331 threads                │
+│ disk headroom   │    49 │ █████····· │ 404.5G free of 3721.9G (89% used)           │
+└─────────────────┴───────┴────────────┴─────────────────────────────────────────────┘
+
+swap headroom is the bottleneck: 16.1G of 17.0G used — 938M free
+→ free memory now — at zero, macOS starts force-killing applications
+→ hog reap would free 39.0G across 17 process(es)
+```
+
+| Check | Weight | What it catches |
+| --- | --- | --- |
+| swap headroom | 3 | How close swap is to exhaustion, where macOS starts force-killing apps |
+| swap activity | 3 | Paging **during the window** — thrashing now, not last Tuesday |
+| memory pressure | 3 | Available memory, with the kernel's own pressure level setting severity |
+| reclaimable | 2 | Memory held by dormant processes — measured with `hog reap`'s own selection |
+| kernel time | 2 | System-time share; high sys on an idle machine means the VM subsystem is drowning |
+| cpu load | 2 | Run queue against core count |
+| process count | 1 | Accumulation (weak signal, weighted accordingly) |
+| disk headroom | 1 | Free space — swap files cannot grow on a full disk |
+
+**Why a window.** Swap and paging counters are cumulative since boot. A single
+reading cannot tell a machine thrashing right now from one that thrashed days
+ago; only the change across an interval can. Fifteen seconds is long enough for
+a stable rate and short enough to wait for.
+
+**The score never hides a failure.** A machine one gigabyte from swap
+exhaustion is in serious trouble however healthy its CPU and disk look, so any
+critical check caps the verdict regardless of the weighted average, two
+criticals force `UNHEALTHY`, and the output leads with the responsible
+subsystem rather than the number.
 
 ## Color
 

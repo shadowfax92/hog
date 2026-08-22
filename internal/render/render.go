@@ -246,3 +246,74 @@ func ShortCommand(cmdline string, max int) string {
 	}
 	return exe + " " + TruncateMiddle(rest, budget)
 }
+
+// HealthRow is one dimension of machine health. Score is rendered as a bar so
+// the shape of the problem is visible without reading every number.
+type HealthRow struct {
+	Name   string
+	Score  int
+	Level  Level
+	Detail string
+}
+
+// healthBar draws a ten-cell meter. It is filled proportionally to score and
+// colored by level, so a red bar that is nearly full still reads as a problem.
+func healthBar(score int, lvl Level) string {
+	const cells = 10
+	filled := (score*cells + 50) / 100
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > cells {
+		filled = cells
+	}
+	return colorize(strings.Repeat("█", filled), lvl) +
+		lipgloss.NewStyle().Faint(true).Render(strings.Repeat("·", cells-filled))
+}
+
+// HealthTable renders the per-check breakdown.
+func HealthTable(rows []HealthRow) string {
+	headerStyle := lipgloss.NewStyle().Foreground(clrHdr).Bold(true)
+	t := table.New().
+		Border(lipgloss.NormalBorder()).
+		BorderStyle(lipgloss.NewStyle().Faint(true)).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			st := lipgloss.NewStyle().Padding(0, 1)
+			if row == table.HeaderRow {
+				st = headerStyle.Padding(0, 1)
+			}
+			if col == 1 { // SCORE is numeric
+				st = st.Align(lipgloss.Right)
+			}
+			return st
+		}).
+		Headers("CHECK", "SCORE", "", "DETAIL")
+	for _, r := range rows {
+		t.Row(r.Name, colorize(fmt.Sprintf("%d", r.Score), r.Level), healthBar(r.Score, r.Level), r.Detail)
+	}
+	return t.String()
+}
+
+// Verdict renders the headline banner for `hog health`.
+func Verdict(label string, score int, lvl Level) string {
+	mark := "✓"
+	switch lvl {
+	case High:
+		mark = "✗"
+	case Med:
+		mark = "⚠"
+	}
+	style := lipgloss.NewStyle().Bold(true).Foreground(levelColor(lvl))
+	return style.Render(fmt.Sprintf("%s  %s — %d/100", mark, label, score))
+}
+
+func levelColor(lvl Level) lipgloss.Color {
+	switch lvl {
+	case High:
+		return clrHigh
+	case Med:
+		return clrMed
+	default:
+		return clrLow
+	}
+}
