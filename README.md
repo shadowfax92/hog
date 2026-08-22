@@ -13,12 +13,14 @@
 `hog` samples the process table over a few seconds, groups each app's many processes into a single line, and ranks them by CPU or memory — color-coded by how big a share of your machine they're really using. Spot the culprit, drill into it with `hog details <app>`, and take out the whole group with `hog kill <app>` — or `hog details <app> -k` to `fzf`-pick just the runaway processes.
 
 - **Grouped by app** — Chrome's 20 helpers and Electron's swarm collapse into one row, so you see the *app* eating your machine, not 40 anonymous processes
+- **Real memory, not RSS** — reads each process's kernel footprint, so the dormant 7 GB language server that `ps` reports as 0 KB can't hide
 - **Sampled, not a snapshot** — averages CPU over 5–30s, so you catch the real hog instead of a one-frame blip
+- **Reap the dead weight** — `hog reap` finds processes that are old, dormant, and still holding memory, and shows what killing them would free before it kills anything
 - **Color-coded by impact** — green / yellow / red by the share of your Mac an app is actually using
 - **Drill in** — `hog details <app>` lists an app's processes with their real command lines, so you can tell the runaway dev server from the idle language servers
 - **Whole-group or surgical kill** — `hog kill chrome` ends the whole group; `hog details node -k` opens an `fzf` multi-select to kill just the offenders. Both `SIGTERM`, then `SIGKILL` for stragglers
 - **CPU or memory** — rank by either; `-m` flips it
-- **Zero config, one binary** — no daemon, no setup; shells out to `ps`, nothing left running
+- **One binary, no daemon** — reads the live process table on each run and leaves nothing behind; only `reap` keeps a config file, for its probes
 
 ---
 
@@ -31,7 +33,8 @@ cd hog
 make install   # builds ./hog and copies it to ~/bin, codesigned
 ```
 
-No config file, nothing to set up — `hog` reads the live process table on each run.
+Nothing to set up: `hog` reads the live process table on each run. `hog reap` writes
+`~/.config/hog/reap.yaml` the first time it runs, with its defaults and probes commented inline.
 
 ## Quick Start
 
@@ -44,11 +47,22 @@ hog details node     # list the processes inside the "node" group
 hog details -k       # fzf-pick app group(s), then process(es) to kill
 hog kill node  # terminate every process in the "node" group
 hog kill       # fzf-pick one or more app groups to terminate
+hog reap       # dry run: what's old, dormant, and big — and what killing it frees
+hog reap -x    # actually reap it
+hog reap -i    # fzf-pick from the candidates
 ```
 
 ## How It Works
 
 `hog` takes two snapshots of the process table `--duration` seconds apart and computes each process's CPU usage *over that window* — real usage during the sample, not the lifetime average `ps` reports by default. It then folds processes into apps by their owning macOS `.app` bundle (a Chrome helper buried five frameworks deep still lands under **Google Chrome**), falling back to the executable name for plain CLI tools and daemons.
+
+### Why not RSS
+
+Memory comes from the kernel's `phys_footprint` (via `proc_pid_rusage`), the same number Activity Monitor shows — **not** `ps`'s RSS.
+
+This matters more than it sounds. macOS compresses idle pages and swaps them out, and RSS counts only what is resident in RAM. A language server that indexed a large project two days ago and then went quiet holds gigabytes against your memory ceiling while `ps -o rss=` reports **0 KB** for it. Ranking by RSS therefore hides precisely the processes worth finding: on the machine this was built for, `ps` put a 76 GB pile of `rust-analyzer` processes at 2.17 GB, ninth on the list.
+
+The kernel refuses `proc_pid_rusage` for processes owned by other users, so system daemons fall back to their RSS for display — and are never reap candidates, which is exactly the right boundary.
 
 CPU% is summed across an app's processes, so **100% ≈ one full core** and a busy multi-core app reads above 100%.
 
@@ -59,7 +73,7 @@ CPU% is summed across an app's processes, so **100% ≈ one full core** and a bu
 ```sh
 hog                 # top 20 apps by CPU, sampled over 5s
 hog -d 30           # 30-second window
-hog -m              # rank by resident memory
+hog -m              # rank by memory footprint
 hog -n 10           # show only the top 10 (0 = all)
 hog -m -n 5         # the 5 biggest memory users
 ```
@@ -67,7 +81,7 @@ hog -m -n 5         # the 5 biggest memory users
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `-d`, `--duration` | `5` | Sampling window in seconds (min 1; 5–30 gives a steadier read) |
-| `-m`, `--mem` | off | Rank by memory instead of CPU |
+| `-m`, `--mem` | off | Rank by memory footprint instead of CPU |
 | `-n`, `--limit` | `20` | Show at most N apps (`0` = all) |
 
 ### Details
@@ -110,7 +124,79 @@ If `<app>` is omitted, `kill` opens an `fzf` multi-select picker of app groups
 sorted by memory, then uses the same confirmation and termination flow for the
 selected groups.
 
-> Note: `hog kill <app>` targets the **whole group** — `hog kill node` hits every `node` process at once. The prompt shows the count before it acts.
+> Note: `hog kill <app>` targets the **whole group** — `hog kill node` hits every `node` process at once. The prompt shows the count before it acts. For a narrower sweep driven by measurements rather than a name, use `hog reap`.
+
+### Reap
+
+```sh
+hog reap                              # dry run — the default; kills nothing
+hog reap --older 2d --duty 0.5        # stricter: older than 2 days, under 0.5% duty
+hog reap --min-mem 1G                 # only things big enough to be worth it
+hog reap -i                           # fzf-pick from the candidates
+hog reap -x                           # execute
+hog reap --tree                       # take descendants along with their parent
+hog reap --all                        # list every candidate, not just the top 25
+```
+
+`reap` finds the processes that quietly accumulate over days of uptime — language
+servers, MCP servers, editor helpers — which are old, have spent almost none of
+that time on CPU, and are still holding significant memory.
+
+It is agnostic about what a process *is*. Selection rests on four measured
+properties, ANDed together:
+
+| Predicate | Flag | Why it isn't enough alone |
+| --- | --- | --- |
+| Age | `--older` | A terminal open for a week is old and perfectly healthy |
+| Duty cycle — lifetime CPU ÷ wall clock | `--duty` | An idle daemon using 2 MB costs nothing |
+| Idle right now | `--max-cpu` | Everything looks idle inside a 5-second window |
+| Footprint | `--min-mem` | A busy process can be large and still be doing its job |
+
+Duty cycle is the signal that separates dormant from merely quiet: a language
+server that indexed once and then slept sits near **0.2%**, while an interactive
+process stays above **1%**.
+
+Two safety rules are structural rather than configurable. Only processes with
+readable kernel accounting are eligible — which is exactly your own processes,
+so no system daemon can be reaped and there is no blocklist to maintain. And
+`reap` never targets itself or its ancestors, so it cannot kill the shell,
+terminal, or multiplexer it is running inside.
+
+### Probes
+
+Some processes hold state that no measurement can see. An editor with an unsaved
+buffer looks identical to one without: same age, same memory, same duty cycle.
+Signals cannot tell them apart — so `reap` asks.
+
+A probe is a command that answers *"is this safe to kill?"* for matching
+processes:
+
+```yaml
+probes:
+  - match: nvim
+    label: unsaved buffers
+    on_unknown: protect
+    ask: |
+      # exit 0 = safe    exit 2 = could not tell    anything else = protect
+      ...
+```
+
+`hog` knows nothing about any specific program — it only substitutes `{pid}`,
+runs the command, and reads the exit status. The shipped `nvim` rule is an
+example of the mechanism living in config, not a special case in the code; copy
+the pattern for anything else that owns unsaved state.
+
+This matters for Neovim specifically: it traps `SIGTERM` as a *deadly signal*
+and exits without prompting, and with `swapfile` off there is no recovery file
+either. The probe asks it over RPC how many modified buffers it has and only
+reaps it when the answer is zero.
+
+Probes can only ever *protect* — they never promote a process the predicates
+rejected. Anything spared is reported, so protection is visible rather than a
+silently smaller total.
+
+Config lives at `~/.config/hog/reap.yaml`, written with commented defaults on
+first run.
 
 ## Color
 
@@ -122,7 +208,7 @@ Color reflects an app's share of *total machine capacity*, not a raw number — 
 | 🟡 yellow | 10–30% | noticeable |
 | 🔴 red | > 30% | hogging |
 
-CPU share is the app's summed CPU% ÷ (cores × 100%); memory share is its resident size ÷ physical RAM. The table is sorted by usage regardless of color, so the top rows are always the suspects. Thresholds live in [`internal/render/render.go`](internal/render/render.go).
+CPU share is the app's summed CPU% ÷ (cores × 100%); memory share is its footprint ÷ physical RAM. The table is sorted by usage regardless of color, so the top rows are always the suspects. Thresholds live in [`internal/render/render.go`](internal/render/render.go).
 
 ---
 

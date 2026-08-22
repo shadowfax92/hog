@@ -4,6 +4,7 @@ package render
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
@@ -156,4 +157,92 @@ func Table(rows []Row) string {
 		t.Row(r.App, colorize(r.CPUText, r.CPULevel), colorize(r.MemText, r.MemLevel), fmt.Sprintf("%d", r.Count))
 	}
 	return t.String()
+}
+
+// Size thresholds for a single process, in KiB.
+const (
+	medProcessSize  = 1024 * 1024     // 1 GiB
+	highProcessSize = 4 * 1024 * 1024 // 4 GiB
+)
+
+// LevelOfSize buckets one process's absolute footprint. It exists alongside
+// LevelOf because the two answer different questions: LevelOf measures an
+// app's share of the whole machine, which is the right lens for the report but
+// paints every individual process green on a large machine — a 7 GiB process
+// is only 6% of 128 GiB. When the user is picking single processes to kill,
+// the useful question is simply "is this one big?".
+func LevelOfSize(kib int64) Level {
+	switch {
+	case kib >= highProcessSize:
+		return High
+	case kib >= medProcessSize:
+		return Med
+	default:
+		return Low
+	}
+}
+
+// ReapRow is one reap candidate. DUTY is the share of its lifetime the process
+// spent on-CPU and COLD the share of its footprint the kernel has compressed
+// or swapped out — together they show why the row was selected.
+type ReapRow struct {
+	PID      int
+	MemText  string
+	MemLevel Level
+	AgeText  string
+	DutyText string
+	ColdText string
+	Command  string
+}
+
+// ReapTable renders reap candidates (already sorted and truncated by the caller).
+func ReapTable(rows []ReapRow) string {
+	headerStyle := lipgloss.NewStyle().Foreground(clrHdr).Bold(true)
+	t := table.New().
+		Border(lipgloss.NormalBorder()).
+		BorderStyle(lipgloss.NewStyle().Faint(true)).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			st := lipgloss.NewStyle().Padding(0, 1)
+			if row == table.HeaderRow {
+				st = headerStyle.Padding(0, 1)
+			}
+			if col < 5 { // PID, MEM, AGE, DUTY, COLD — right-align; COMMAND stays left
+				st = st.Align(lipgloss.Right)
+			}
+			return st
+		}).
+		Headers("PID", "MEM", "AGE", "DUTY", "COLD", "COMMAND")
+	for _, r := range rows {
+		t.Row(
+			fmt.Sprintf("%d", r.PID),
+			colorize(r.MemText, r.MemLevel),
+			r.AgeText,
+			r.DutyText,
+			lipgloss.NewStyle().Faint(true).Render(r.ColdText),
+			r.Command,
+		)
+	}
+	return t.String()
+}
+
+// ShortCommand formats a full command line for a narrow column: it reduces the
+// executable to its basename and then middle-truncates the remainder. Plain
+// middle truncation of the whole string hides the one field that identifies
+// the process — "/Users/me/.local/share/nvim/mason/bin/rust-analyzer --log-file
+// /var/folders/…/4-rust-analyzer.log" truncates to a head of anonymous path and
+// a tail of log file, naming neither the program nor its job.
+func ShortCommand(cmdline string, max int) string {
+	exe, rest, _ := strings.Cut(strings.TrimSpace(cmdline), " ")
+	if i := strings.LastIndexByte(exe, '/'); i >= 0 {
+		exe = exe[i+1:]
+	}
+	if rest == "" {
+		return TruncateMiddle(exe, max)
+	}
+	// Reserve the executable name in full; the arguments absorb the truncation.
+	budget := max - len([]rune(exe)) - 1
+	if budget < 8 {
+		return TruncateMiddle(exe+" "+rest, max)
+	}
+	return exe + " " + TruncateMiddle(rest, budget)
 }

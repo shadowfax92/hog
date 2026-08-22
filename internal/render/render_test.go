@@ -88,3 +88,23 @@ func TestTableContainsAppNamesInOrder(t *testing.T) {
 		t.Errorf("app order wrong: Chrome should appear before Slack:\n%s", out)
 	}
 }
+
+func TestShortCommand(t *testing.T) {
+	// The executable name must survive truncation — it is the only field that
+	// identifies the process.
+	long := "/Users/me/.local/share/nvim/mason/bin/rust-analyzer --log-file /var/folders/ab/cd/T/x/4-rust-analyzer.log"
+	got := ShortCommand(long, 64)
+	if !strings.HasPrefix(got, "rust-analyzer ") {
+		t.Errorf("ShortCommand kept an anonymous path head: %q", got)
+	}
+	if len([]rune(got)) > 64 {
+		t.Errorf("ShortCommand returned %d runes, want <= 64", len([]rune(got)))
+	}
+
+	if got := ShortCommand("/bin/ls", 40); got != "ls" {
+		t.Errorf("ShortCommand(/bin/ls) = %q, want %q", got, "ls")
+	}
+	if got := ShortCommand("nvim --embed", 40); got != "nvim --embed" {
+		t.Errorf("short commands should pass through unchanged, got %q", got)
+	}
+}
