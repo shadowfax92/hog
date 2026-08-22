@@ -11,11 +11,11 @@ import (
 
 // Group is the aggregated resource usage of one app across all its processes.
 type Group struct {
-	App    string
-	CPUPct float64
-	RSSKiB int64
-	Count  int
-	PIDs   []int
+	App          string
+	CPUPct       float64
+	FootprintKiB int64
+	Count        int
+	PIDs         []int
 }
 
 // AppKey maps an executable path to its owning app name. It returns the
@@ -62,7 +62,7 @@ func Aggregate(procs []proc.Proc) []Group {
 			order = append(order, key)
 		}
 		g.CPUPct += p.CPUPct
-		g.RSSKiB += p.RSSKiB
+		g.FootprintKiB += p.FootprintKiB
 		g.Count++
 		g.PIDs = append(g.PIDs, p.PID)
 	}
@@ -79,15 +79,15 @@ func Sort(groups []Group, byMem bool) {
 	sort.SliceStable(groups, func(i, j int) bool {
 		a, b := groups[i], groups[j]
 		if byMem {
-			if a.RSSKiB != b.RSSKiB {
-				return a.RSSKiB > b.RSSKiB
+			if a.FootprintKiB != b.FootprintKiB {
+				return a.FootprintKiB > b.FootprintKiB
 			}
 			return a.CPUPct > b.CPUPct
 		}
 		if a.CPUPct != b.CPUPct {
 			return a.CPUPct > b.CPUPct
 		}
-		return a.RSSKiB > b.RSSKiB
+		return a.FootprintKiB > b.FootprintKiB
 	})
 }
 

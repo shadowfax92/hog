@@ -50,7 +50,7 @@ func groupPickerLines(groups []group.Group, metric groupPickerMetric) []string {
 		case groupPickerMem:
 			lines = append(lines, fmt.Sprintf("%-4d %8s %6d  %s",
 				i+1,
-				render.HumanBytes(g.RSSKiB),
+				render.HumanBytes(g.FootprintKiB),
 				g.Count,
 				g.App,
 			))
@@ -58,7 +58,7 @@ func groupPickerLines(groups []group.Group, metric groupPickerMetric) []string {
 			lines = append(lines, fmt.Sprintf("%-4d %6s %8s %6d  %s",
 				i+1,
 				fmt.Sprintf("%.0f%%", g.CPUPct),
-				render.HumanBytes(g.RSSKiB),
+				render.HumanBytes(g.FootprintKiB),
 				g.Count,
 				g.App,
 			))

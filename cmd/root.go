@@ -89,8 +89,8 @@ func toRows(groups []group.Group, ncpu int, totalRAM int64) []render.Row {
 			App:      g.App,
 			CPUText:  fmt.Sprintf("%.0f%%", g.CPUPct),
 			CPULevel: render.LevelOf(g.CPUPct / (100 * float64(ncpu))),
-			MemText:  render.HumanBytes(g.RSSKiB),
-			MemLevel: render.LevelOf(memShare(g.RSSKiB, totalRAM)),
+			MemText:  render.HumanBytes(g.FootprintKiB),
+			MemLevel: render.LevelOf(memShare(g.FootprintKiB, totalRAM)),
 			Count:    g.Count,
 		})
 	}

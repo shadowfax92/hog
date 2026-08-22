@@ -77,7 +77,7 @@ func runDetails(cmd *cobra.Command, args []string) error {
 
 	for _, g := range matches {
 		fmt.Fprintf(out, "\n%s — %d processes · %.0f%% CPU · %s\n",
-			g.App, g.Count, g.CPUPct, render.HumanBytes(g.RSSKiB))
+			g.App, g.Count, g.CPUPct, render.HumanBytes(g.FootprintKiB))
 
 		pids := append([]int(nil), g.PIDs...)
 		sort.SliceStable(pids, func(i, j int) bool {
@@ -95,8 +95,8 @@ func runDetails(cmd *cobra.Command, args []string) error {
 				PID:      pid,
 				CPUText:  fmt.Sprintf("%.0f%%", p.CPUPct),
 				CPULevel: render.LevelOf(p.CPUPct / (100 * float64(ncpu))),
-				MemText:  render.HumanBytes(p.RSSKiB),
-				MemLevel: render.LevelOf(memShare(p.RSSKiB, totalRAM)),
+				MemText:  render.HumanBytes(p.FootprintKiB),
+				MemLevel: render.LevelOf(memShare(p.FootprintKiB, totalRAM)),
 				Command:  render.TruncateMiddle(cmdline, commandColWidth),
 			})
 		}
@@ -157,7 +157,7 @@ func killViaPicker(out io.Writer, matches []group.Group, byPID map[int]proc.Proc
 		lines = append(lines, fmt.Sprintf("%-7d %6s %8s  %s",
 			pid,
 			fmt.Sprintf("%.0f%%", p.CPUPct),
-			render.HumanBytes(p.RSSKiB),
+			render.HumanBytes(p.FootprintKiB),
 			render.TruncateMiddle(cmdline, 120),
 		))
 	}
@@ -209,9 +209,9 @@ func parsePickedPIDs(out string) []int {
 }
 
 // memShare is an app/process's resident memory as a fraction of physical RAM.
-func memShare(rssKiB, totalRAM int64) float64 {
+func memShare(footprintKiB, totalRAM int64) float64 {
 	if totalRAM <= 0 {
 		return 0
 	}
-	return float64(rssKiB) * 1024 / float64(totalRAM)
+	return float64(footprintKiB) * 1024 / float64(totalRAM)
 }

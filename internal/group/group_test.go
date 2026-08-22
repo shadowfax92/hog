@@ -29,9 +29,9 @@ func TestAppKeyFallsBackToBasename(t *testing.T) {
 
 func TestAggregateSumsAndCounts(t *testing.T) {
 	procs := []proc.Proc{
-		{PID: 10, CPUPct: 12, RSSKiB: 100, Comm: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"},
-		{PID: 11, CPUPct: 8, RSSKiB: 200, Comm: "/Applications/Google Chrome.app/Contents/Helpers/Google Chrome Helper"},
-		{PID: 20, CPUPct: 5, RSSKiB: 50, Comm: "/sbin/launchd"},
+		{PID: 10, CPUPct: 12, FootprintKiB: 100, Comm: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"},
+		{PID: 11, CPUPct: 8, FootprintKiB: 200, Comm: "/Applications/Google Chrome.app/Contents/Helpers/Google Chrome Helper"},
+		{PID: 20, CPUPct: 5, FootprintKiB: 50, Comm: "/sbin/launchd"},
 	}
 	byApp := map[string]Group{}
 	for _, g := range Aggregate(procs) {
@@ -47,8 +47,8 @@ func TestAggregateSumsAndCounts(t *testing.T) {
 	if chrome.CPUPct != 20 {
 		t.Errorf("chrome CPUPct = %v, want 20", chrome.CPUPct)
 	}
-	if chrome.RSSKiB != 300 {
-		t.Errorf("chrome RSSKiB = %d, want 300", chrome.RSSKiB)
+	if chrome.FootprintKiB != 300 {
+		t.Errorf("chrome FootprintKiB = %d, want 300", chrome.FootprintKiB)
 	}
 	if len(chrome.PIDs) != 2 {
 		t.Errorf("chrome PIDs = %v, want 2 entries", chrome.PIDs)
@@ -57,9 +57,9 @@ func TestAggregateSumsAndCounts(t *testing.T) {
 
 func TestSortByCPUThenByMem(t *testing.T) {
 	groups := []Group{
-		{App: "a", CPUPct: 5, RSSKiB: 900},
-		{App: "b", CPUPct: 30, RSSKiB: 100},
-		{App: "c", CPUPct: 10, RSSKiB: 500},
+		{App: "a", CPUPct: 5, FootprintKiB: 900},
+		{App: "b", CPUPct: 30, FootprintKiB: 100},
+		{App: "c", CPUPct: 10, FootprintKiB: 500},
 	}
 	Sort(groups, false)
 	if groups[0].App != "b" || groups[1].App != "c" || groups[2].App != "a" {

@@ -89,8 +89,13 @@ func TestSampleComputesWindowedCPU(t *testing.T) {
 	if p := byPID[1]; p.CPUPct < 99.9 || p.CPUPct > 100.1 {
 		t.Errorf("pid1 CPUPct = %v, want ~100", p.CPUPct)
 	}
-	if p := byPID[1]; p.RSSKiB != 150 {
-		t.Errorf("pid1 RSSKiB = %d, want 150 (latest snapshot)", p.RSSKiB)
+	// Unmeasured processes (kernel accounting denied) fall back to the ps RSS
+	// from the latest snapshot rather than dropping out of the report.
+	if p := byPID[1]; p.FootprintKiB != 150 {
+		t.Errorf("pid1 FootprintKiB = %d, want 150 (ps fallback, latest snapshot)", p.FootprintKiB)
+	}
+	if p := byPID[1]; p.Measured {
+		t.Error("pid1 Measured = true, want false (no kernel stats in this fixture)")
 	}
 	if p := byPID[2]; p.CPUPct != 0 {
 		t.Errorf("pid2 CPUPct = %v, want 0", p.CPUPct)
