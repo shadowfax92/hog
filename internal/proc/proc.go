@@ -36,14 +36,26 @@ type Proc struct {
 	CPUTotal time.Duration // lifetime user+system CPU
 	Threads  int           // live threads
 
-	// Measured reports whether kernel accounting was readable. The kernel
-	// denies proc_pid_rusage for processes owned by other users, so Measured
-	// is true exactly for the caller's own processes. Commands that kill
-	// treat this as a safety boundary: an unmeasurable process is somebody
-	// else's (root, _windowserver, …) and is never a reap candidate. This
-	// makes the permission model the protection model, with no blocklist to
-	// maintain.
+	// Measured reports whether kernel accounting was readable. Other users'
+	// processes are normally unreadable, but many OS components run as the
+	// logged-in user. Readable accounting is not proof that a process is safe
+	// to reap; reap adds executable identity and lifecycle protections.
 	Measured bool
+
+	// Safety is populated by reap's live inspection, separately from sampling
+	// so report/details commands do not need AppKit or launchd queries.
+	Safety Safety
+}
+
+// Safety carries OS observations into reap's pure selection step. Unknown
+// observations fail closed; a controlling terminal marks the boundary between
+// an app's private helpers and independently launched CLI work.
+type Safety struct {
+	PlatformBinary bool
+	RunningApp     bool
+	LaunchdManaged bool
+	HasTTY         bool
+	Unavailable    bool
 }
 
 // Duty is the fraction of its lifetime a process has spent on-CPU. It

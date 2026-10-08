@@ -7,10 +7,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config holds reap's defaults and the probe rules. It lives on disk so that
-// policy — which programs deserve to be asked before they are killed — stays
-// out of hog's code. hog itself knows nothing about any specific program; it
-// only knows how to run a probe command and read its exit status.
+// Config adds defaults and protection/probe rules to reap's structural safety.
+// Program-specific policy lives on disk; OS and app protection require no
+// owner-maintained list and cannot be disabled by configuration.
 type Config struct {
 	Defaults Defaults `yaml:"defaults"`
 	Protect  []string `yaml:"protect"`
@@ -44,23 +43,22 @@ type Probe struct {
 // that owns unsaved state.
 const DefaultConfig = `# hog reap configuration
 #
-# Predicates select processes that are old, dormant, and expensive. Probes then
-# ask matching processes whether they are actually safe to kill.
+# OS processes, app bundles, GUI/menu-bar apps and their helpers, and launchd
+# jobs are automatically protected. Predicates select remaining processes that
+# are old, dormant, and expensive; probes can add further protection.
 
 defaults:
   older: 12h     # process must have been alive at least this long
   duty: 1.0      # lifetime CPU / wall-clock must be below this percent
   min_mem: 200M  # footprint must be at least this large to be worth reaping
 
-# Never reap a process whose executable name contains any of these.
-# Uncomment what you would rather not lose to a sweep. Long-running agent
-# sessions and browser renderers both qualify on the predicates — they are old,
-# nearly idle, and large — but killing them discards live conversation state or
-# an open tab, which no measurement can see.
+# Add protection for CLI processes whose executable name contains any of these.
+# Long-running agent sessions can qualify on the predicates, but killing them
+# discards live conversation state that no measurement can see. Apps and their
+# renderers already have structural protection.
 protect: []
   # - claude
   # - codex
-  # - Google Chrome
 
 # Ask before killing. {pid} is substituted.
 #   exit 0 = safe to reap    exit 2 = could not tell (on_unknown decides)
