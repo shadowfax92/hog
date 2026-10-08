@@ -7,6 +7,18 @@ import (
 	"hog/internal/proc"
 )
 
+const testShellPID = 9000
+
+// withTerminal models an independently launched CLI workload. The shell has
+// a controlling terminal and fails the measurement gates itself; its children
+// can qualify without being mistaken for unregistered launchd jobs or orphans.
+func withTerminal(procs []proc.Proc) []proc.Proc {
+	return append(procs, proc.Proc{
+		PID: testShellPID, PPID: 1, Comm: "/opt/tools/shell", Measured: true,
+		Safety: proc.Safety{HasTTY: true},
+	})
+}
+
 // dormant builds a process that passes every default predicate, so each test
 // can vary exactly one property and see it decide the outcome.
 func dormant(pid, ppid int, comm string) proc.Proc {
@@ -39,19 +51,19 @@ func pidSet(cs []Candidate) map[int]bool {
 }
 
 func TestSelectAppliesEveryPredicate(t *testing.T) {
-	young := dormant(2, 1, "/opt/tools/young")
+	young := dormant(2, testShellPID, "/opt/tools/young")
 	young.Age = time.Hour
 
-	busy := dormant(3, 1, "/opt/tools/busy")
+	busy := dormant(3, testShellPID, "/opt/tools/busy")
 	busy.CPUTotal = 24 * time.Hour // 50% duty
 
-	spiking := dormant(4, 1, "/opt/tools/spiking")
+	spiking := dormant(4, testShellPID, "/opt/tools/spiking")
 	spiking.CPUPct = 80
 
-	small := dormant(5, 1, "/opt/tools/small")
+	small := dormant(5, testShellPID, "/opt/tools/small")
 	small.FootprintKiB = 1024 // 1 MiB
 
-	procs := []proc.Proc{dormant(10, 1, "/opt/tools/reapable"), young, busy, spiking, small}
+	procs := withTerminal([]proc.Proc{dormant(10, testShellPID, "/opt/tools/reapable"), young, busy, spiking, small})
 	got := pidSet(Select(procs, defaultCriteria(), 999, nil).Candidates)
 
 	if !got[10] {
@@ -130,9 +142,9 @@ func TestSelectSparesSelfAndAncestors(t *testing.T) {
 		dormant(100, 1, "/opt/tools/terminal"),
 		dormant(200, 100, "/opt/tools/shell"),
 		dormant(300, 200, "/opt/tools/hog"),
-		dormant(400, 1, "/opt/tools/unrelated"),
+		dormant(400, testShellPID, "/opt/tools/unrelated"),
 	}
-	res := Select(procs, defaultCriteria(), 300, nil)
+	res := Select(withTerminal(procs), defaultCriteria(), 300, nil)
 	got := pidSet(res.Candidates)
 
 	for _, pid := range []int{100, 200, 300} {
@@ -156,7 +168,7 @@ func TestSelectAllowsThirdPartyPaths(t *testing.T) {
 		"/Users/me/app-cache.appcache/bin/helper", "/opt/tools/not-a-bundle.app",
 	} {
 		t.Run(path, func(t *testing.T) {
-			res := Select([]proc.Proc{dormant(10, 1, path)}, defaultCriteria(), 999, nil)
+			res := Select(withTerminal([]proc.Proc{dormant(10, testShellPID, path)}), defaultCriteria(), 999, nil)
 			if len(res.Candidates) != 1 || len(res.Protected) != 0 {
 				t.Fatalf("plain third-party CLI should remain eligible, got %+v", res)
 			}
@@ -185,8 +197,40 @@ func TestSelectProtectsLaunchdHelpersAndUnknownAncestry(t *testing.T) {
 	}
 }
 
+func TestSelectProtectsUnregisteredLaunchdChildrenAndOrphans(t *testing.T) {
+	root := dormant(10, 1, "/opt/tools/service-in-another-domain")
+	helper := dormant(11, 10, "/opt/tools/helper")
+	orphan := dormant(12, 1, "/opt/tools/orphan")
+	orphan.Safety.HasTTY = true
+	cli := dormant(20, testShellPID, "/opt/tools/language-server")
+	res := Select(withTerminal([]proc.Proc{root, helper, orphan, cli}), defaultCriteria(), 999, nil)
+	got := pidSet(res.Candidates)
+	if len(got) != 1 || !got[20] {
+		t.Fatalf("only independent terminal work should be eligible, got %+v", res)
+	}
+	if len(res.Protected) != 3 {
+		t.Fatalf("unknown launchd/orphan ownership must be visible, got %+v", res.Protected)
+	}
+}
+
+func TestSelectUsesKernelIdentityWithoutLosingConfiguredAliases(t *testing.T) {
+	app := dormant(10, 1, "innocent-display-name")
+	app.Safety.Executable = "/Applications/Example.app/Contents/MacOS/Example"
+	alias := dormant(20, testShellPID, "agent")
+	alias.Safety.Executable = "/Users/me/.local/share/agent/versions/1.2.3"
+	procs := withTerminal([]proc.Proc{app, alias})
+	res := Select(procs, defaultCriteria(), 999, nil)
+	if got := pidSet(res.Candidates); len(got) != 1 || !got[20] {
+		t.Fatalf("kernel identity must protect the app and allow the plain versioned CLI, got %+v", res)
+	}
+	res = Select(procs, defaultCriteria(), 999, []string{"agent"})
+	if len(res.Candidates) != 0 || len(res.Protected) != 2 || res.Protected[1].Why != "protect: agent" {
+		t.Fatalf("the existing display-name protection must still apply, got %+v", res)
+	}
+}
+
 func TestSelectProtectNames(t *testing.T) {
-	procs := []proc.Proc{dormant(30, 1, "/usr/local/bin/postgres"), dormant(31, 1, "/opt/tools/other")}
+	procs := withTerminal([]proc.Proc{dormant(30, testShellPID, "/usr/local/bin/postgres"), dormant(31, testShellPID, "/opt/tools/other")})
 	res := Select(procs, defaultCriteria(), 999, []string{"postgres"})
 
 	if pidSet(res.Candidates)[30] {
@@ -200,19 +244,19 @@ func TestSelectProtectNames(t *testing.T) {
 // --tree exists so that killing a parent does not strand its helpers, which
 // would otherwise keep holding memory with nothing left to serve.
 func TestSelectTreePullsInDescendants(t *testing.T) {
-	parent := dormant(50, 1, "/opt/tools/editor")
+	parent := dormant(50, testShellPID, "/opt/tools/editor")
 	child := dormant(51, 50, "/opt/tools/languageserver")
 	child.FootprintKiB = 1024 // too small to qualify alone
 	grandchild := dormant(52, 51, "/opt/tools/helper")
 	grandchild.Age = time.Minute // too young to qualify alone
 
 	crit := defaultCriteria()
-	if got := pidSet(Select([]proc.Proc{parent, child, grandchild}, crit, 999, nil).Candidates); got[51] || got[52] {
+	if got := pidSet(Select(withTerminal([]proc.Proc{parent, child, grandchild}), crit, 999, nil).Candidates); got[51] || got[52] {
 		t.Error("without --tree, descendants failing predicates must be left alone")
 	}
 
 	crit.Tree = true
-	res := Select([]proc.Proc{parent, child, grandchild}, crit, 999, nil)
+	res := Select(withTerminal([]proc.Proc{parent, child, grandchild}), crit, 999, nil)
 	got := pidSet(res.Candidates)
 	for _, pid := range []int{50, 51, 52} {
 		if !got[pid] {
@@ -223,13 +267,13 @@ func TestSelectTreePullsInDescendants(t *testing.T) {
 
 // A protected descendant stays protected even when --tree sweeps its parent.
 func TestSelectTreeRespectsProtection(t *testing.T) {
-	parent := dormant(60, 1, "/opt/tools/editor")
+	parent := dormant(60, testShellPID, "/opt/tools/editor")
 	child := dormant(61, 60, "/usr/local/bin/postgres")
 	child.FootprintKiB = 1024
 
 	crit := defaultCriteria()
 	crit.Tree = true
-	res := Select([]proc.Proc{parent, child}, crit, 999, []string{"postgres"})
+	res := Select(withTerminal([]proc.Proc{parent, child}), crit, 999, []string{"postgres"})
 
 	if pidSet(res.Candidates)[61] {
 		t.Error("a protected descendant must not be swept in by --tree")
@@ -265,7 +309,7 @@ func TestSelectProtectsAppOwnedHelpersButAllowsTerminalWork(t *testing.T) {
 func TestSelectTreeCannotStartFromOrCrossProtection(t *testing.T) {
 	crit := defaultCriteria()
 	crit.Tree = true
-	parent := dormant(100, 1, "/opt/tools/worker")
+	parent := dormant(100, testShellPID, "/opt/tools/worker")
 	app := dormant(101, 100, "/Applications/Example.app/Contents/MacOS/Example")
 	app.FootprintKiB = 1024
 	appChild := dormant(102, 101, "/opt/tools/cli")
@@ -273,11 +317,11 @@ func TestSelectTreeCannotStartFromOrCrossProtection(t *testing.T) {
 	appChild.Age = time.Minute
 	safeChild := dormant(103, 100, "/opt/tools/helper")
 	safeChild.FootprintKiB = 1024
-	protectedRoot := dormant(200, 1, "/opt/tools/protected")
+	protectedRoot := dormant(200, testShellPID, "/opt/tools/protected")
 	rootChild := dormant(201, 200, "/opt/tools/cli")
 	rootChild.Age = time.Minute
 
-	res := Select([]proc.Proc{parent, app, appChild, safeChild, protectedRoot, rootChild}, crit, 999, []string{"protected"})
+	res := Select(withTerminal([]proc.Proc{parent, app, appChild, safeChild, protectedRoot, rootChild}), crit, 999, []string{"protected"})
 	got := pidSet(res.Candidates)
 	if len(got) != 2 || !got[100] || !got[103] {
 		t.Fatalf("tree must stop at protection and only start at safe roots, got %+v", res)
@@ -288,19 +332,19 @@ func TestSelectTreeCannotStartFromOrCrossProtection(t *testing.T) {
 }
 
 func TestFreedSumsCandidates(t *testing.T) {
-	a, b := dormant(70, 1, "/opt/tools/a"), dormant(71, 1, "/opt/tools/b")
-	res := Select([]proc.Proc{a, b}, defaultCriteria(), 999, nil)
+	a, b := dormant(70, testShellPID, "/opt/tools/a"), dormant(71, testShellPID, "/opt/tools/b")
+	res := Select(withTerminal([]proc.Proc{a, b}), defaultCriteria(), 999, nil)
 	if want := a.FootprintKiB + b.FootprintKiB; res.Freed() != want {
 		t.Errorf("Freed() = %d, want %d", res.Freed(), want)
 	}
 }
 
 func TestCandidatesSortedByFootprint(t *testing.T) {
-	small, big := dormant(80, 1, "/opt/tools/small"), dormant(81, 1, "/opt/tools/big")
+	small, big := dormant(80, testShellPID, "/opt/tools/small"), dormant(81, testShellPID, "/opt/tools/big")
 	small.FootprintKiB = 1024 * 1024
 	big.FootprintKiB = 8 * 1024 * 1024
 
-	res := Select([]proc.Proc{small, big}, defaultCriteria(), 999, nil)
+	res := Select(withTerminal([]proc.Proc{small, big}), defaultCriteria(), 999, nil)
 	if len(res.Candidates) != 2 || res.Candidates[0].PID != 81 {
 		t.Errorf("candidates should lead with the largest footprint, got %+v", res.Candidates)
 	}

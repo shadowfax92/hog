@@ -22,16 +22,16 @@ type Criteria struct {
 	Tree         bool    // also take descendants of qualifying processes
 }
 
-// Candidate is a process that passed every predicate, carrying the reasons it
-// qualified so a dry run can explain itself.
+// Candidate passed the predicates or was selected through a safe tree root,
+// and survived protection checks. Reasons let a dry run explain its selection.
 type Candidate struct {
 	proc.Proc
 	Reasons []string
 	ViaTree bool // pulled in as a descendant, not on its own merits
 }
 
-// Protected is a process that would otherwise have qualified but was spared,
-// with the reason shown to the user so protection is never silent.
+// Protected would otherwise have been selected by measurements or tree
+// expansion, but was spared with a visible reason.
 type Protected struct {
 	proc.Proc
 	Why string

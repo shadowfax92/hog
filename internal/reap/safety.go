@@ -9,6 +9,9 @@ import (
 	"hog/internal/proc"
 )
 
+// protectionReason combines direct identity with inherited ownership before
+// user-configured rules. Native inspection supplies facts; this policy remains
+// pure so an unsafe selection can be reproduced with synthetic process tables.
 func protectionReason(p proc.Proc, byPID map[int]proc.Proc, selfLine map[int]bool, names []string) string {
 	if selfLine[p.PID] {
 		return "hog or ancestor"
@@ -40,13 +43,19 @@ func helperProtection(p proc.Proc, byPID map[int]proc.Proc) string {
 		if !ok {
 			return "process ancestry unavailable"
 		}
-		switch {
-		case appExecutable(parent.Comm) || parent.Safety.RunningApp:
+		if appExecutable(executablePath(parent)) || parent.Safety.RunningApp {
 			return "app-owned helper"
+		}
+		if parent.Safety.HasTTY {
+			return ""
+		}
+		switch {
 		case parent.Safety.LaunchdManaged:
 			return "launchd-owned helper"
-		case parent.Safety.Unavailable || !filepath.IsAbs(parent.Comm):
+		case parent.Safety.Unavailable || !filepath.IsAbs(executablePath(parent)):
 			return "safety inspection unavailable"
+		case parent.PPID == 1:
+			return "launchd/orphan ancestry"
 		}
 		p = parent
 	}
@@ -56,22 +65,35 @@ func helperProtection(p proc.Proc, byPID map[int]proc.Proc) string {
 // directProtection uses executable identity and OS registration, never names.
 // Its precedence gives each spared process one stable, useful display reason.
 func directProtection(p proc.Proc) string {
+	path := executablePath(p)
 	switch {
-	case appleExecutable(p.Comm):
+	case appleExecutable(path):
 		return "Apple system executable"
 	case p.Safety.PlatformBinary:
 		return "Apple platform binary"
-	case appExecutable(p.Comm):
+	case appExecutable(path):
 		return "app bundle executable"
 	case p.Safety.RunningApp:
 		return "running GUI/menu-bar app"
 	case p.Safety.LaunchdManaged:
 		return "launchd-managed service"
-	case p.Safety.Unavailable || !filepath.IsAbs(p.Comm):
+	case p.Safety.Unavailable || !filepath.IsAbs(path):
 		return "safety inspection unavailable"
+	case p.PPID == 1:
+		// The current bootstrap registry cannot disprove ownership by a job in
+		// another domain. PID 1 also adopts orphaned app helpers, so both cases
+		// must be spared rather than treating absence from 'list' as permission.
+		return "launchd child or orphan"
 	default:
 		return ""
 	}
+}
+
+func executablePath(p proc.Proc) string {
+	if p.Safety.Executable != "" {
+		return p.Safety.Executable
+	}
+	return p.Comm
 }
 
 // appExecutable covers every executable in a bundle, including nested helper

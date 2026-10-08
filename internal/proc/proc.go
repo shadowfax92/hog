@@ -19,7 +19,8 @@ import (
 
 // Proc is a sampled process. CPUPct is measured over the sampling window;
 // every other field is an instantaneous read from the latest snapshot.
-// Comm is the executable path and may contain spaces.
+// Comm is ps's executable display name/path and may contain spaces; it can be
+// a mutable title rather than an absolute path. Reap verifies identity separately.
 type Proc struct {
 	PID    int
 	PPID   int
@@ -51,6 +52,9 @@ type Proc struct {
 // observations fail closed; a controlling terminal marks the boundary between
 // an app's private helpers and independently launched CLI work.
 type Safety struct {
+	// Executable is the kernel's path. Keep it separate from Comm: versioned
+	// CLI binaries can publish an alias that existing protect/probe rules use.
+	Executable     string
 	PlatformBinary bool
 	RunningApp     bool
 	LaunchdManaged bool

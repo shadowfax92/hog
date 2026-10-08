@@ -35,7 +35,7 @@ var reapCmd = &cobra.Command{
 		"dormant language servers and helpers that accumulate over days of uptime and\n" +
 		"end up filling swap.\n\n" +
 		"Apple system/platform processes, app bundles, GUI/menu-bar apps and their\n" +
-		"helpers, and launchd-managed services are protected automatically. A\n" +
+		"helpers, launchd-managed services, and orphans are protected automatically. A\n" +
 		"controlling terminal separates independently launched CLI work from app\n" +
 		"helpers. Configured probes can add protection. reap is a dry run unless\n" +
 		"given -x or -i; neither flag overrides structural protection.",

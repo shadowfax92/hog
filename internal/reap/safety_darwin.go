@@ -79,7 +79,7 @@ func InspectSafety(procs []proc.Proc) error {
 			p.Safety.Unavailable = true
 			continue
 		}
-		p.Comm = C.GoString(&identity.path[0])
+		p.Safety.Executable = C.GoString(&identity.path[0])
 		p.PPID = int(identity.ppid)
 		p.Safety.PlatformBinary = identity.platform != 0
 		p.Safety.HasTTY = identity.tty != 0
@@ -107,6 +107,8 @@ func runningApps() (map[int]bool, error) {
 // launchdJobs uses launchctl's documented three-column list, rather than the
 // explicitly unstable 'print' output or guessing from PPID == 1. Protecting
 // every registered job is conservative and avoids per-job KeepAlive probes.
+// Selection separately spares PID-1 children/orphans because absence from this
+// bootstrap context's registry cannot exclude a service in another domain.
 func launchdJobs() (map[int]bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

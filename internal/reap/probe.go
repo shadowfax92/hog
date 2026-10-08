@@ -92,6 +92,43 @@ func ApplyProbes(res *Result, probes []Probe, timeout time.Duration) {
 		kept = append(kept, c)
 	}
 	res.Candidates = kept
+	pruneProtectedTrees(res)
+}
+
+// pruneProtectedTrees reapplies tree boundaries after asynchronous probes.
+// Tree-only candidates need an uninterrupted path through surviving candidates
+// to an independently qualifying root. Independent candidates stay eligible:
+// their own measurements, rather than a refused ancestor, selected them.
+func pruneProtectedTrees(res *Result) {
+	byPID := make(map[int]Candidate, len(res.Candidates))
+	for _, c := range res.Candidates {
+		byPID[c.PID] = c
+	}
+	kept := res.Candidates[:0]
+	for _, c := range res.Candidates {
+		if !c.ViaTree || hasTreeRoot(c, byPID) {
+			kept = append(kept, c)
+		} else {
+			res.Protected = append(res.Protected, Protected{Proc: c.Proc, Why: "protected tree ancestor"})
+		}
+	}
+	res.Candidates = kept
+}
+
+func hasTreeRoot(c Candidate, byPID map[int]Candidate) bool {
+	seen := map[int]bool{c.PID: true}
+	for pid := c.PPID; pid > 1 && !seen[pid]; {
+		seen[pid] = true
+		parent, ok := byPID[pid]
+		if !ok {
+			return false
+		}
+		if !parent.ViaTree {
+			return true
+		}
+		pid = parent.PPID
+	}
+	return false
 }
 
 // probeFor returns the first probe whose match string appears in the

@@ -168,6 +168,9 @@ Safety is structural and cannot be overridden by `-x`, `-i`, or `--tree`:
 - App-owned helpers outside the bundle, and launchd-registered services and
   their helpers. All registered services are protected, rather than trying to
   infer which ones launchd would restart through KeepAlive or on demand.
+- Processes parented by launchd (PID 1), including orphans, and their helpers.
+  A job absent from the caller's registry may belong to another launchd domain;
+  an orphan may be an app helper. Both are spared when ownership is uncertain.
 - `hog` itself and its ancestors, and processes whose safety inspection or
   ancestry cannot be verified. Unreadable kernel accounting is also ineligible.
 
@@ -182,9 +185,11 @@ sweep; use an explicit `hog kill` or `hog details -k` for a deliberate target.
 Executable paths and signing flags are read from the running process in the
 kernel, rather than trusting its `ps` display name. AppKit supplies the running
 GUI/accessory app snapshot, and `launchctl list` supplies the running jobs in
-the caller's launchd context. This does not infer services in other launchd
-domains or reconstruct ownership after an unbundled helper has been orphaned.
-`--tree` only starts from safe candidates and stops at protected processes.
+the caller's launchd context. The PID-1 fallback covers unlisted services and
+orphaned helpers conservatively, without claiming to distinguish them.
+`--tree` only starts from safe candidates and stops at protected processes,
+including probe refusals. Tree-only children of a refusing process are spared;
+independently qualifying processes retain their own candidacy.
 Every otherwise qualifying process spared by these checks appears in the
 `protected: N × reason` summary, including when nothing remains to reap.
 

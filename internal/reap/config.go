@@ -44,8 +44,8 @@ type Probe struct {
 const DefaultConfig = `# hog reap configuration
 #
 # OS processes, app bundles, GUI/menu-bar apps and their helpers, and launchd
-# jobs are automatically protected. Predicates select remaining processes that
-# are old, dormant, and expensive; probes can add further protection.
+# jobs/orphans are automatically protected. Predicates select remaining
+# processes that are old, dormant, and expensive; probes can add protection.
 
 defaults:
   older: 12h     # process must have been alive at least this long
