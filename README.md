@@ -64,7 +64,7 @@ Memory comes from the kernel's `phys_footprint` (via `proc_pid_rusage`), the sam
 
 This matters more than it sounds. macOS compresses idle pages and swaps them out, and RSS counts only what is resident in RAM. A language server that indexed a large project two days ago and then went quiet holds gigabytes against your memory ceiling while `ps -o rss=` reports **0 KB** for it. Ranking by RSS therefore hides precisely the processes worth finding: on the machine this was built for, `ps` put a 76 GB pile of `rust-analyzer` processes at 2.17 GB, ninth on the list.
 
-The kernel refuses `proc_pid_rusage` for processes owned by other users, so system daemons fall back to their RSS for display — and are never reap candidates, which is exactly the right boundary.
+Processes with unreadable `proc_pid_rusage` accounting fall back to RSS for display and are never reap candidates. Readable accounting is not an OS safety boundary: Dock, Finder, and other macOS components run as the logged-in user. `reap` protects them separately through executable identity and OS registration.
 
 CPU% is summed across an app's processes, so **100% ≈ one full core** and a busy multi-core app reads above 100%.
 
@@ -144,8 +144,8 @@ hog reap --all                        # list every candidate, not just the top 2
 servers, MCP servers, editor helpers — which are old, have spent almost none of
 that time on CPU, and are still holding significant memory.
 
-It is agnostic about what a process *is*. Selection rests on four measured
-properties, ANDed together:
+It uses no list of program names. After structural safety checks, selection
+rests on four measured properties, ANDed together:
 
 | Predicate | Flag | Why it isn't enough alone |
 | --- | --- | --- |
@@ -158,11 +158,40 @@ Duty cycle is the signal that separates dormant from merely quiet: a language
 server that indexed once and then slept sits near **0.2%**, while an interactive
 process stays above **1%**.
 
-Two safety rules are structural rather than configurable. Only processes with
-readable kernel accounting are eligible — which is exactly your own processes,
-so no system daemon can be reaped and there is no blocklist to maintain. And
-`reap` never targets itself or its ancestors, so it cannot kill the shell,
-terminal, or multiplexer it is running inside.
+Safety is structural and cannot be overridden by `-x`, `-i`, or `--tree`:
+
+- Apple executables under `/System`, `/usr` (except `/usr/local`), `/bin`,
+  `/sbin`, and `/Library/Apple`, plus kernel-identified platform binaries.
+- Every executable inside an `.app` bundle, including nested helpers and XPC
+  services. Registered regular and accessory/menu-bar apps are also protected
+  even if their executable lives outside a bundle.
+- App-owned helpers outside the bundle, and launchd-registered services and
+  their helpers. All registered services are protected, rather than trying to
+  infer which ones launchd would restart through KeepAlive or on demand.
+- Processes parented by launchd (PID 1), including orphans, and their helpers.
+  A job absent from the caller's registry may belong to another launchd domain;
+  an orphan may be an app helper. Both are spared when ownership is uncertain.
+- `hog` itself and its ancestors, and processes whose safety inspection or
+  ancestry cannot be verified. Unreadable kernel accounting is also ineligible.
+
+A controlling terminal breaks inherited app ownership. A dormant language
+server launched by a terminal shell can still qualify, including tools under
+`/usr/local` and `/opt/homebrew`. A language server attached directly to a live
+GUI editor's extension host stays protected, even outside the editor bundle;
+killing it can break the editor. Bundle-contained executables stay protected
+even when launched from a terminal. There is no flag to include apps in a reap
+sweep; use an explicit `hog kill` or `hog details -k` for a deliberate target.
+
+Executable paths and signing flags are read from the running process in the
+kernel, rather than trusting its `ps` display name. AppKit supplies the running
+GUI/accessory app snapshot, and `launchctl list` supplies the running jobs in
+the caller's launchd context. The PID-1 fallback covers unlisted services and
+orphaned helpers conservatively, without claiming to distinguish them.
+`--tree` only starts from safe candidates and stops at protected processes,
+including probe refusals. Tree-only children of a refusing process are spared;
+independently qualifying processes retain their own candidacy.
+Every otherwise qualifying process spared by these checks appears in the
+`protected: N × reason` summary, including when nothing remains to reap.
 
 ### Probes
 

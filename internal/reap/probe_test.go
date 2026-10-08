@@ -79,3 +79,42 @@ func TestProbeForMatchesBasename(t *testing.T) {
 		t.Error("probe matched a directory component instead of the basename")
 	}
 }
+
+func TestProbesStopTreeAtProtectedRoot(t *testing.T) {
+	root := dormant(100, testShellPID, "/opt/tools/editor")
+	small := dormant(101, 100, "/opt/tools/small-helper")
+	small.FootprintKiB = 1024
+	independent := dormant(102, 100, "/opt/tools/large-helper")
+	crit := defaultCriteria()
+	crit.Tree = true
+	res := Select(withTerminal([]proc.Proc{root, small, independent}), crit, 999, nil)
+	ApplyProbes(&res, []Probe{{Match: "editor", Ask: "exit 1", Label: "unsaved work"}}, time.Second)
+	got := pidSet(res.Candidates)
+	if len(got) != 1 || !got[102] {
+		t.Fatalf("probe refusal must remove tree-only work but preserve independent candidates, got %+v", res)
+	}
+	if len(res.Protected) != 2 {
+		t.Fatalf("both probe refusal and blocked tree helper must be visible, got %+v", res.Protected)
+	}
+}
+
+func TestProbesStopTreeAtProtectedIntermediateNode(t *testing.T) {
+	root := dormant(100, testShellPID, "/opt/tools/worker")
+	middle := dormant(101, 100, "/opt/tools/protected-helper")
+	middle.FootprintKiB = 1024
+	leaf := dormant(102, 101, "/opt/tools/leaf")
+	leaf.Age = time.Minute
+	sibling := dormant(103, 100, "/opt/tools/sibling")
+	sibling.FootprintKiB = 1024
+	crit := defaultCriteria()
+	crit.Tree = true
+	res := Select(withTerminal([]proc.Proc{root, middle, leaf, sibling}), crit, 999, nil)
+	ApplyProbes(&res, []Probe{{Match: "protected-helper", Ask: "exit 1", Label: "busy"}}, time.Second)
+	got := pidSet(res.Candidates)
+	if len(got) != 2 || !got[100] || !got[103] {
+		t.Fatalf("tree must stop at the refusing middle node without affecting siblings, got %+v", res)
+	}
+	if len(res.Protected) != 2 {
+		t.Fatalf("middle node and dependent leaf must be visibly spared, got %+v", res.Protected)
+	}
+}

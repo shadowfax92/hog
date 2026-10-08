@@ -19,7 +19,8 @@ import (
 
 // Proc is a sampled process. CPUPct is measured over the sampling window;
 // every other field is an instantaneous read from the latest snapshot.
-// Comm is the executable path and may contain spaces.
+// Comm is ps's executable display name/path and may contain spaces; it can be
+// a mutable title rather than an absolute path. Reap verifies identity separately.
 type Proc struct {
 	PID    int
 	PPID   int
@@ -36,14 +37,29 @@ type Proc struct {
 	CPUTotal time.Duration // lifetime user+system CPU
 	Threads  int           // live threads
 
-	// Measured reports whether kernel accounting was readable. The kernel
-	// denies proc_pid_rusage for processes owned by other users, so Measured
-	// is true exactly for the caller's own processes. Commands that kill
-	// treat this as a safety boundary: an unmeasurable process is somebody
-	// else's (root, _windowserver, …) and is never a reap candidate. This
-	// makes the permission model the protection model, with no blocklist to
-	// maintain.
+	// Measured reports whether kernel accounting was readable. Other users'
+	// processes are normally unreadable, but many OS components run as the
+	// logged-in user. Readable accounting is not proof that a process is safe
+	// to reap; reap adds executable identity and lifecycle protections.
 	Measured bool
+
+	// Safety is populated by reap's live inspection, separately from sampling
+	// so report/details commands do not need AppKit or launchd queries.
+	Safety Safety
+}
+
+// Safety carries OS observations into reap's pure selection step. Unknown
+// observations fail closed; a controlling terminal marks the boundary between
+// an app's private helpers and independently launched CLI work.
+type Safety struct {
+	// Executable is the kernel's path. Keep it separate from Comm: versioned
+	// CLI binaries can publish an alias that existing protect/probe rules use.
+	Executable     string
+	PlatformBinary bool
+	RunningApp     bool
+	LaunchdManaged bool
+	HasTTY         bool
+	Unavailable    bool
 }
 
 // Duty is the fraction of its lifetime a process has spent on-CPU. It

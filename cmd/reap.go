@@ -34,9 +34,11 @@ var reapCmd = &cobra.Command{
 		"none of that time on-CPU, and are still holding significant memory — the\n" +
 		"dormant language servers and helpers that accumulate over days of uptime and\n" +
 		"end up filling swap.\n\n" +
-		"It is agnostic about what a process is: selection rests on measured\n" +
-		"properties, plus probes (configured, not hardcoded) that ask a process\n" +
-		"directly whether it is safe to kill. reap is a dry run unless given -x.",
+		"Apple system/platform processes, app bundles, GUI/menu-bar apps and their\n" +
+		"helpers, launchd-managed services, and orphans are protected automatically. A\n" +
+		"controlling terminal separates independently launched CLI work from app\n" +
+		"helpers. Configured probes can add protection. reap is a dry run unless\n" +
+		"given -x or -i; neither flag overrides structural protection.",
 	Args:          cobra.NoArgs,
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -89,6 +91,9 @@ func runReap(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	if err := reap.InspectSafety(procs); err != nil {
+		fmt.Fprintf(out, "Safety inspection unavailable; otherwise eligible processes will be protected (%v).\n", err)
+	}
 	res := reap.Select(procs, crit, currentPID(), cfg.Protect)
 	reap.ApplyProbes(&res, cfg.Probes, reap.DefaultProbeTimeout)
 
@@ -99,7 +104,6 @@ func runReap(cmd *cobra.Command, _ []string) error {
 
 	cmds := proc.Commands(reap.PIDs(res.Candidates))
 	printReapTable(out, res, cmds)
-	printProtected(out, res)
 
 	switch {
 	case flagReapPick:
@@ -155,6 +159,9 @@ func firstNonEmpty(vals ...string) string {
 }
 
 func printReapSummary(w io.Writer, res reap.Result, crit reap.Criteria) {
+	// Protection belongs to the summary even when it leaves no candidates;
+	// otherwise a fully protected machine would hide the safety decisions.
+	defer printProtected(w, res)
 	fmt.Fprintf(w, "%d processes scanned, %d yours\n", res.Scanned, res.Yours)
 	fmt.Fprintln(w, render.Hint(fmt.Sprintf(
 		"criteria: older than %s · duty below %.2f%% · idle now · at least %s",

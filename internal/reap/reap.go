@@ -22,16 +22,16 @@ type Criteria struct {
 	Tree         bool    // also take descendants of qualifying processes
 }
 
-// Candidate is a process that passed every predicate, carrying the reasons it
-// qualified so a dry run can explain itself.
+// Candidate passed the predicates or was selected through a safe tree root,
+// and survived protection checks. Reasons let a dry run explain its selection.
 type Candidate struct {
 	proc.Proc
 	Reasons []string
 	ViaTree bool // pulled in as a descendant, not on its own merits
 }
 
-// Protected is a process that would otherwise have qualified but was spared,
-// with the reason shown to the user so protection is never silent.
+// Protected would otherwise have been selected by measurements or tree
+// expansion, but was spared with a visible reason.
 type Protected struct {
 	proc.Proc
 	Why string
@@ -56,12 +56,11 @@ func (r Result) Freed() int64 {
 
 // Select applies the predicates to a sampled process table.
 //
-// Two safety rules are structural rather than configurable. First, only
-// processes with readable kernel accounting are eligible: macOS denies
-// proc_pid_rusage for other users' processes, so this excludes every system
-// daemon without hog maintaining a list of them. Second, the calling process
-// and its ancestors are never candidates, so reap cannot kill the shell,
-// terminal, or multiplexer it is running inside.
+// Readable kernel accounting is required, but does not exclude OS components
+// running as the logged-in user. Executable identity, app ownership, launchd
+// registration, and the caller's ancestry supply independent protections.
+// InspectSafety supplies the live OS observations; selection itself is pure so
+// safety can be tested without signalling a process.
 func Select(procs []proc.Proc, c Criteria, selfPID int, protectNames []string) Result {
 	res := Result{Scanned: len(procs)}
 
@@ -76,31 +75,49 @@ func Select(procs []proc.Proc, c Criteria, selfPID int, protectNames []string) R
 	}
 
 	selfLine := ancestry(byPID, selfPID)
+	protection := make(map[int]string, len(procs))
+	for _, p := range procs {
+		protection[p.PID] = protectionReason(p, byPID, selfLine, protectNames)
+	}
 
 	// Pass 1: processes qualifying on their own merits.
 	qualified := map[int]bool{}
 	for _, p := range procs {
-		if !p.Measured || selfLine[p.PID] {
+		if !p.Measured {
 			continue
 		}
-		if reasons, ok := qualifies(p, c); ok {
+		if _, ok := qualifies(p, c); ok {
 			qualified[p.PID] = true
-			_ = reasons
 		}
 	}
 
-	// Pass 2: with --tree, a qualifying process drags its descendants along
-	// even if they are individually too small or too young. Killing a parent
-	// without its children would otherwise leave orphaned helpers holding
-	// memory with nothing left to serve.
+	// Pass 2: only safe roots can pull in descendants. A protected node is a
+	// lifecycle boundary: record it for display, but do not sweep through it
+	// into work owned by a different app or service.
 	viaTree := map[int]bool{}
 	if c.Tree {
 		for pid := range qualified {
-			for _, d := range descendants(children, pid) {
-				if !qualified[d] && !selfLine[d] {
-					if p, ok := byPID[d]; ok && p.Measured {
-						viaTree[d] = true
-					}
+			if protection[pid] != "" {
+				continue
+			}
+			seen := map[int]bool{pid: true}
+			stack := append([]int(nil), children[pid]...)
+			for len(stack) > 0 {
+				d := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				if seen[d] {
+					continue
+				}
+				seen[d] = true
+				p := byPID[d]
+				if !p.Measured {
+					continue
+				}
+				if !qualified[d] {
+					viaTree[d] = true
+				}
+				if protection[d] == "" {
+					stack = append(stack, children[d]...)
 				}
 			}
 		}
@@ -118,8 +135,8 @@ func Select(procs []proc.Proc, c Criteria, selfPID int, protectNames []string) R
 
 	for _, pid := range selected {
 		p := byPID[pid]
-		if name := matchesAny(p.Comm, protectNames); name != "" {
-			res.Protected = append(res.Protected, Protected{Proc: p, Why: "protect: " + name})
+		if why := protection[pid]; why != "" {
+			res.Protected = append(res.Protected, Protected{Proc: p, Why: why})
 			continue
 		}
 		reasons, _ := qualifies(p, c)
@@ -169,24 +186,6 @@ func ancestry(byPID map[int]proc.Proc, pid int) map[int]bool {
 		pid = p.PPID
 	}
 	return line
-}
-
-// descendants collects the full subtree below pid, excluding pid itself.
-func descendants(children map[int][]int, pid int) []int {
-	var out []int
-	seen := map[int]bool{pid: true}
-	stack := append([]int(nil), children[pid]...)
-	for len(stack) > 0 {
-		n := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		if seen[n] {
-			continue
-		}
-		seen[n] = true
-		out = append(out, n)
-		stack = append(stack, children[n]...)
-	}
-	return out
 }
 
 // matchesAny returns the first pattern contained in the executable's basename,
